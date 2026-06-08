@@ -1,0 +1,8 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import DashboardView from '../components/dashboard/DashboardView.tsx';
+export const prerender = false;
+---
+<AppLayout title="Dashboard" activeSection="dashboard">
+  <DashboardView client:load />
+</AppLayout>

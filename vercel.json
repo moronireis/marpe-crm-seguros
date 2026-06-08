@@ -1,0 +1,13 @@
+{
+  "framework": "astro",
+  "crons": [
+    {
+      "path": "/api/internal/corp-sync",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/internal/check-installments",
+      "schedule": "0 11 * * *"
+    }
+  ]
+}

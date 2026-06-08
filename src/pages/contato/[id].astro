@@ -1,0 +1,10 @@
+---
+import AppLayout from '../../layouts/AppLayout.astro';
+import ContactDetailView from '../../components/contacts/ContactDetailView.tsx';
+export const prerender = false;
+
+const { id } = Astro.params;
+---
+<AppLayout title="Contato">
+  <ContactDetailView contactId={id!} client:load />
+</AppLayout>

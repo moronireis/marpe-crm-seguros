@@ -1,0 +1,8 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import LinksView from '../components/links/LinksView';
+export const prerender = false;
+---
+<AppLayout title="Links" activeSection="links">
+  <LinksView client:load />
+</AppLayout>

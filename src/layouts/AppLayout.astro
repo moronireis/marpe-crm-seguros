@@ -1,0 +1,362 @@
+---
+import '../styles/global.css';
+
+export const prerender = false;
+
+interface Props {
+  title: string;
+  activeSection?: 'inbox' | 'crm' | 'dashboard' | 'campanhas' | 'automacoes' | 'templates' | 'links' | 'config';
+}
+
+const { title, activeSection = 'dashboard' } = Astro.props;
+const profile = Astro.locals.profile;
+const isAdmin = profile?.role === 'admin';
+
+function getInitials(name: string | undefined): string {
+  if (!name) return 'U';
+  const parts = name.trim().split(' ');
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
+const initials = getInitials(profile?.full_name);
+
+const navItems = [
+  { id: 'inbox', label: 'Inbox', href: '/inbox', icon: 'chat' },
+  { id: 'crm', label: 'Funis', href: '/crm', icon: 'kanban' },
+  { id: 'dashboard', label: 'Dashboard', href: '/dashboard', icon: 'chart' },
+  { id: 'campanhas', label: 'Campanhas', href: '/campanhas', icon: 'send' },
+  { id: 'automacoes', label: 'Automações', href: '/automacoes', icon: 'bolt' },
+  { id: 'templates', label: 'Templates', href: '/templates', icon: 'template' },
+  { id: 'links', label: 'Links', href: '/links', icon: 'link' },
+];
+---
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title} | Marpe CRM</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body class="h-screen overflow-hidden flex">
+  <!-- Mobile hamburger button -->
+  <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Abrir menu">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  </button>
+
+  <!-- Mobile overlay -->
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+  <!-- Sidebar -->
+  <nav id="sidebar" class="sidebar">
+    <a href="/dashboard" class="sidebar-logo" title="Marpe CRM">M</a>
+
+    <div class="sidebar-nav">
+      {navItems.map(item => (
+        <a
+          href={item.href}
+          class:list={['sidebar-item', { active: activeSection === item.id }]}
+          title={item.label}
+          data-section={item.id}
+        >
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            {item.icon === 'chat' && <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />}
+            {item.icon === 'kanban' && <><rect x="3" y="3" width="7" height="18" rx="1" /><rect x="14" y="3" width="7" height="12" rx="1" /></>}
+            {item.icon === 'chart' && <path d="M18 20V10M12 20V4M6 20v-6" />}
+            {item.icon === 'send' && <><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></>}
+            {item.icon === 'bolt' && <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />}
+            {item.icon === 'link' && <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>}
+            {item.icon === 'template' && <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>}
+          </svg>
+          {activeSection === item.id && <span class="sidebar-indicator"></span>}
+          {item.id === 'inbox' && <span class="nav-badge nav-badge--red" id="badge-inbox" aria-label="conversas não lidas"></span>}
+          {item.id === 'crm'   && <span class="nav-badge nav-badge--amber" id="badge-crm" aria-label="ações pendentes"></span>}
+        </a>
+      ))}
+    </div>
+
+    <div class="sidebar-bottom">
+      {isAdmin && (
+        <a href="/config" class:list={['sidebar-item', { active: activeSection === 'config' }]} title="Configurações">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </a>
+      )}
+      <div class="sidebar-avatar" title={profile?.full_name || 'Usuário'}>
+        {initials}
+      </div>
+      <form action="/api/auth/logout" method="post">
+        <button type="submit" class="sidebar-item" title="Sair">
+          <svg class="sidebar-icon" viewBox="0 0 24 24">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
+      </form>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <main class="flex-1 overflow-hidden flex flex-col">
+    <slot />
+  </main>
+</body>
+</html>
+
+<style>
+  .sidebar {
+    width: var(--sidebar-width);
+    background: #08080f;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    flex-shrink: 0;
+  }
+  .sidebar-logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), #2563EB);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    color: #fff;
+    margin-bottom: 16px;
+    text-decoration: none;
+  }
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+  }
+  .sidebar-item {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+    text-decoration: none;
+  }
+  .sidebar-item:hover {
+    background: #14141e;
+    color: var(--text-secondary);
+  }
+  .sidebar-item.active {
+    background: var(--accent-dim);
+    color: var(--accent-light);
+  }
+  .sidebar-icon {
+    width: 18px;
+    height: 18px;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .sidebar-indicator {
+    position: absolute;
+    left: -10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 16px;
+    border-radius: 0 2px 2px 0;
+    background: var(--accent);
+  }
+  .sidebar-bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-top: auto;
+  }
+  .sidebar-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #1e1e30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-light);
+    cursor: pointer;
+  }
+
+  /* ── Notification badges ─────────────────────────────────────── */
+  .nav-badge {
+    display: none; /* hidden until JS sets a count */
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+    color: #fff;
+    pointer-events: none;
+    /* smooth pop-in */
+    animation: badge-pop 0.2s cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+  .nav-badge--red   { background: var(--red); }
+  .nav-badge--amber { background: var(--amber); color: #000; }
+  .nav-badge.visible { display: block; }
+
+  @keyframes badge-pop {
+    from { transform: scale(0.5); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+
+  /* ── Mobile responsive ────────────────────────────────────────── */
+  .sidebar-toggle {
+    display: none;
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 200;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: #08080f;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+    background: rgba(0, 0, 0, 0.6);
+  }
+  .sidebar-overlay.active {
+    display: block;
+  }
+
+  @media (max-width: 768px) {
+    .sidebar-toggle {
+      display: flex;
+    }
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100%;
+      z-index: 100;
+      transform: translateX(-100%);
+      transition: transform 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    .sidebar.open {
+      transform: translateX(0);
+    }
+    /* Push main content to full width on mobile */
+    body {
+      display: block;
+    }
+    main {
+      width: 100%;
+      padding-top: 58px; /* room for the toggle button */
+    }
+  }
+</style>
+
+<script>
+  const toggle = document.getElementById('sidebar-toggle');
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+
+  function openSidebar() {
+    sidebar?.classList.add('open');
+    overlay?.classList.add('active');
+  }
+
+  function closeSidebar() {
+    sidebar?.classList.remove('open');
+    overlay?.classList.remove('active');
+  }
+
+  toggle?.addEventListener('click', () => {
+    if (sidebar?.classList.contains('open')) {
+      closeSidebar();
+    } else {
+      openSidebar();
+    }
+  });
+
+  overlay?.addEventListener('click', closeSidebar);
+
+  // Close sidebar when a nav link is tapped on mobile
+  sidebar?.querySelectorAll('a[href]').forEach(link => {
+    link.addEventListener('click', () => {
+      if (window.innerWidth <= 768) closeSidebar();
+    });
+  });
+</script>
+
+<script>
+  // ── Notification badges + tab title ───────────────────────────────────────
+  const BASE_TITLE = document.title.replace(/^\(\d+\)\s*/, '');
+
+  const badgeInbox = document.getElementById('badge-inbox') as HTMLElement | null;
+  const badgeCrm   = document.getElementById('badge-crm')   as HTMLElement | null;
+
+  function setBadge(el: HTMLElement | null, count: number) {
+    if (!el) return;
+    if (count > 0) {
+      el.textContent = count > 99 ? '99+' : String(count);
+      el.classList.add('visible');
+    } else {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+  }
+
+  async function fetchUnread() {
+    try {
+      const res = await fetch('/api/notifications/unread');
+      if (!res.ok) return;
+      const data: { unreadConversations: number; pendingDeals: number } = await res.json();
+
+      setBadge(badgeInbox, data.unreadConversations);
+      setBadge(badgeCrm,   data.pendingDeals);
+
+      // Update browser tab title
+      document.title = data.unreadConversations > 0
+        ? `(${data.unreadConversations}) ${BASE_TITLE}`
+        : BASE_TITLE;
+    } catch {
+      // Silently ignore network errors — badges simply stay as-is
+    }
+  }
+
+  // Initial fetch + poll every 30 s
+  fetchUnread();
+  setInterval(fetchUnread, 30_000);
+</script>

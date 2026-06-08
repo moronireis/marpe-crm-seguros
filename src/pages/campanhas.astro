@@ -1,0 +1,8 @@
+---
+import AppLayout from '../layouts/AppLayout.astro';
+import CampaignsView from '../components/campaigns/CampaignsView';
+export const prerender = false;
+---
+<AppLayout title="Campanhas" activeSection="campanhas">
+  <CampaignsView client:load />
+</AppLayout>
