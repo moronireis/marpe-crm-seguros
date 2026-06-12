@@ -244,7 +244,7 @@ export default function ContactDetailView({ contactId }: Props) {
             Enviar mensagem
           </a>
           <a
-            href="/crm"
+            href={`/crm?new_deal=${contact.id}`}
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', textDecoration: 'none' }}
           >
             <svg style={{ width: 14, height: 14, stroke: 'currentColor', fill: 'none', strokeWidth: 2 }} viewBox="0 0 24 24">

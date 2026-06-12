@@ -11,15 +11,14 @@ export const GET: APIRoute = async ({ locals, url }) => {
   if (profile instanceof Response) return profile;
 
   const contactId = url.searchParams.get('contact_id');
-  if (!contactId) return new Response(JSON.stringify({ error: 'contact_id required' }), { status: 400 });
+  const dealId = url.searchParams.get('deal_id');
+  if (!contactId && !dealId) return new Response(JSON.stringify({ error: 'contact_id or deal_id required' }), { status: 400 });
 
   const sb = createServerClient();
-  const { data, error } = await sb
-    .from('marpe_messages')
-    .select('*')
-    .eq('contact_id', contactId)
-    .order('created_at', { ascending: true })
-    .limit(100);
+  let query = sb.from('marpe_messages').select('*').order('created_at', { ascending: true }).limit(200);
+  if (dealId) query = query.eq('deal_id', dealId);
+  else if (contactId) query = query.eq('contact_id', contactId);
+  const { data, error } = await query;
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   return new Response(JSON.stringify({ messages: data }), { status: 200 });
@@ -30,7 +29,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const profile = requireAuth(locals);
   if (profile instanceof Response) return profile;
 
-  let body: { contact_id?: string; phone?: string; text?: string };
+  let body: { contact_id?: string; phone?: string; text?: string; deal_id?: string };
   try { body = await request.json(); } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 });
   }
@@ -77,6 +76,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   if (body.contact_id) {
     await sb.from('marpe_messages').insert({
       contact_id: body.contact_id,
+      deal_id: body.deal_id || null,
       wa_message_id: uaData.messageid || null,
       direction: 'outbound',
       content_type: 'text',

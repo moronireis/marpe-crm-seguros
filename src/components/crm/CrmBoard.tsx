@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { DndContext, DragOverlay, useDroppable, useDraggable, PointerSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent } from '@dnd-kit/core';
 import DealPanel from './DealPanel';
 
 // ─── Shared input styles ──────────────────────────────────────────────────────
@@ -34,6 +35,28 @@ const RAMO_COLORS: Record<string, { bg: string; color: string }> = {
   financiamento: { bg: 'rgba(20,184,166,0.12)', color: '#2dd4bf' },
   rcge: { bg: 'rgba(251,146,60,0.12)', color: '#fb923c' },
 };
+
+// ─── DnD helpers ─────────────────────────────────────────────────────────────
+function DroppableColumn({ id, children }: { id: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div ref={setNodeRef} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, background: isOver ? 'rgba(59,130,246,0.04)' : 'transparent', borderRadius: 8, transition: 'background 0.15s' }}>
+      {children}
+    </div>
+  );
+}
+
+function DraggableCard({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id });
+  const style: React.CSSProperties = transform
+    ? { transform: `translate(${transform.x}px, ${transform.y}px)`, opacity: isDragging ? 0.5 : 1, zIndex: isDragging ? 100 : 'auto' }
+    : {};
+  return (
+    <div ref={setNodeRef} {...listeners} {...attributes} style={style}>
+      {children}
+    </div>
+  );
+}
 
 const DEAL_TYPE_LABELS: Record<string, string> = {
   prospeccao: 'Prospecção',
@@ -109,6 +132,20 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
   const firstStageId = funnels
     .find(f => f.id === activeFunnelId)?.stages
     ?.slice().sort((a, b) => a.sort_order - b.sort_order)[0]?.id || '';
+
+  // Auto-fill contact from URL param
+  useEffect(() => {
+    const prefill = (window as any).__prefillContactId;
+    if (prefill) {
+      delete (window as any).__prefillContactId;
+      fetch(`/api/contacts/${prefill}`).then(r => r.json()).then(d => {
+        if (d.contact) {
+          setForm(f => ({ ...f, contact_id: d.contact.id }));
+          setContactSearch(d.contact.name + (d.contact.phone ? ` · ${d.contact.phone}` : ''));
+        }
+      }).catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     if (contactSearch.length < 2) { setContactOptions([]); setShowDropdown(false); return; }
@@ -361,15 +398,21 @@ function ExportFunnelButton({ funnelId }: { funnelId: string }) {
 
 // ─── FilterBar ────────────────────────────────────────────────────────────────
 function FilterBar({
-  filters, onChange, onClear, users,
+  filters, onChange, onClear, users, deals,
 }: {
   filters: FilterState;
   onChange: (f: Partial<FilterState>) => void;
   onClear: () => void;
   users: UserOption[];
+  deals: Deal[];
 }) {
   const sel = (key: keyof FilterState) => (e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>) =>
     onChange({ [key]: e.target.value });
+
+  // Extract unique options from deals data
+  const seguradoras = useMemo(() => [...new Set(deals.map(d => d.seguradora).filter(Boolean) as string[])].sort(), [deals]);
+  const produtores = useMemo(() => [...new Set(deals.map(d => d.produtor).filter(Boolean) as string[])].sort(), [deals]);
+  const statuses = useMemo(() => [...new Set(deals.map(d => d.status_custom).filter(Boolean) as string[])].sort(), [deals]);
 
   const filterInputStyle = (active: boolean): React.CSSProperties => ({
     ...FILTER_INPUT_S,
@@ -420,25 +463,27 @@ function FilterBar({
       {/* Seguradora */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Seguradora</span>
-        <input
-          type="text"
+        <select
           value={filters.seguradora}
           onChange={sel('seguradora')}
-          placeholder="Ex: Porto Seguro..."
-          style={{ ...filterInputStyle(!!filters.seguradora), width: 150 }}
-        />
+          style={{ ...filterInputStyle(!!filters.seguradora), width: 150, cursor: 'pointer' }}
+        >
+          <option value="">Todas</option>
+          {seguradoras.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
       </div>
 
       {/* Produtor */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Produtor</span>
-        <input
-          type="text"
+        <select
           value={filters.produtor}
           onChange={sel('produtor')}
-          placeholder="Nome do produtor..."
-          style={{ ...filterInputStyle(!!filters.produtor), width: 140 }}
-        />
+          style={{ ...filterInputStyle(!!filters.produtor), width: 140, cursor: 'pointer' }}
+        >
+          <option value="">Todos</option>
+          {produtores.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
       </div>
 
       {/* Tipo */}
@@ -461,13 +506,14 @@ function FilterBar({
       {/* Status */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Status</span>
-        <input
-          type="text"
+        <select
           value={filters.status}
           onChange={sel('status')}
-          placeholder="Status..."
-          style={{ ...filterInputStyle(!!filters.status), width: 120 }}
-        />
+          style={{ ...filterInputStyle(!!filters.status), width: 130, cursor: 'pointer' }}
+        >
+          <option value="">Todos</option>
+          {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
       </div>
 
       {/* Próxima ação */}
@@ -523,6 +569,31 @@ export default function CrmBoard() {
   // ── Sort state (U3) ────────────────────────────────────────────────────────
   const [gradeSortDir, setGradeSortDir] = useState<'asc' | 'desc'>('asc');
 
+  // ── Drag-and-drop ──────────────────────────────────────────────────────────
+  const [draggingDealId, setDraggingDealId] = useState<string | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  function handleDragStart(event: DragStartEvent) {
+    setDraggingDealId(String(event.active.id));
+  }
+  async function handleDragEnd(event: DragEndEvent) {
+    setDraggingDealId(null);
+    const { active, over } = event;
+    if (!over) return;
+    const dealId = String(active.id);
+    const stageId = String(over.id);
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal || deal.stage_id === stageId) return;
+    // Optimistic update
+    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage_id: stageId } : d));
+    const res = await fetch(`/api/deals/${dealId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage_id: stageId }),
+    });
+    if (!res.ok) reloadDeals(); // revert on error
+  }
+
   // Detect mobile
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
@@ -546,6 +617,22 @@ export default function CrmBoard() {
   // Load users for filter dropdown
   useEffect(() => {
     fetch('/api/users').then(r => r.json()).then(d => setUsers(d.users || [])).catch(() => {});
+  }, []);
+
+  // Read URL query params: ?deal=ID (open deal panel), ?new_deal=CONTACT_ID (open new deal form)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const dealParam = params.get('deal');
+    const newDealParam = params.get('new_deal');
+    if (dealParam) setActiveDealId(dealParam);
+    if (newDealParam) {
+      setShowNewDeal(true);
+      // Pre-fill contact after NewDealModal mounts (handled via prop)
+      (window as any).__prefillContactId = newDealParam;
+    }
+    if (dealParam || newDealParam) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   // Load deals
@@ -604,10 +691,10 @@ export default function CrmBoard() {
       // U2 filters
       if (filters.responsavel && d.responsible_id !== filters.responsavel) return false;
       if (filters.ramo && (d.ramo || '').toLowerCase() !== filters.ramo.toLowerCase()) return false;
-      if (filters.seguradora && !(d.seguradora || '').toLowerCase().includes(filters.seguradora.toLowerCase())) return false;
-      if (filters.produtor && !(d.produtor || '').toLowerCase().includes(filters.produtor.toLowerCase())) return false;
+      if (filters.seguradora && d.seguradora !== filters.seguradora) return false;
+      if (filters.produtor && d.produtor !== filters.produtor) return false;
       if (filters.tipo && d.deal_type !== filters.tipo) return false;
-      if (filters.status && !(d.status_custom || '').toLowerCase().includes(filters.status.toLowerCase())) return false;
+      if (filters.status && d.status_custom !== filters.status) return false;
       if (filters.dateRange !== 'todos') {
         if (!d.next_action_date) return false;
         const dt = new Date(d.next_action_date);
@@ -834,6 +921,7 @@ export default function CrmBoard() {
             onChange={updateFilters}
             onClear={clearFilters}
             users={users}
+            deals={deals}
           />
         )}
 
@@ -848,31 +936,33 @@ export default function CrmBoard() {
         {loading ? (
           <div style={{ padding: 32, color: 'var(--text-muted)', fontSize: 13 }}>Carregando negócios...</div>
         ) : viewMode === 'kanban' ? (
-          /* ── Kanban (U3: sorted by next_action_date within each stage) ──── */
-          <div style={{ flex: 1, overflowX: 'auto', padding: 20, display: 'flex', gap: 14 }}>
+          /* ── Kanban with drag-and-drop ────────────────────────────────── */
+          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: 20, display: 'flex', gap: 14 }}>
             {stages.map(stage => {
               const stageDeals = dealsByStage(stage.id);
               const sum = stageDeals.reduce((a, d) => a + (d.premio || 0), 0);
               return (
-                <div key={stage.id} style={{ minWidth: 280, maxWidth: 280, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                <div key={stage.id} style={{ minWidth: 280, maxWidth: 280, height: '100%', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', marginBottom: 6 }}>
                     <div style={{ width: 8, height: 8, borderRadius: '50%', background: stage.color }} />
                     <span style={{ fontSize: 13, fontWeight: 600 }}>{stage.name}</span>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-card)', padding: '2px 8px', borderRadius: 100, marginLeft: 'auto' }}>{stageDeals.length}</span>
                     {sum > 0 && <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 600 }}>{formatPremio(sum)}</span>}
                   </div>
-                  <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <DroppableColumn id={stage.id}>
                     {stageDeals.slice(0, 50).map(d => {
                       const r = RAMO_COLORS[d.ramo?.toLowerCase() || ''] || { bg: 'var(--border)', color: 'var(--text-muted)' };
                       const urgency = nextActionUrgency(d.next_action_date);
                       return (
+                        <DraggableCard key={d.id} id={d.id}>
                         <div
-                          key={d.id}
                           onClick={() => setActiveDealId(d.id)}
                           style={{
                             background: activeDealId === d.id ? 'rgba(59,130,246,0.06)' : 'var(--bg-card)',
                             border: `1px solid ${activeDealId === d.id ? 'rgba(59,130,246,0.3)' : 'var(--border)'}`,
-                            borderRadius: 10, padding: 14, cursor: 'pointer',
+                            borderLeft: `3px solid ${r.color}`,
+                            borderRadius: 10, padding: 14, cursor: 'grab',
                           }}
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -893,7 +983,6 @@ export default function CrmBoard() {
                               </span>
                             </div>
                           )}
-                          {/* Next action date (U3 visibility) */}
                           {d.next_action_date && (
                             <div style={{ fontSize: 10, marginBottom: 4, ...urgency }}>
                               Ação: {formatDate(d.next_action_date)}
@@ -904,6 +993,7 @@ export default function CrmBoard() {
                             {d.apolice && <span style={{ color: 'var(--text-muted)' }}>#{d.apolice.slice(-6)}</span>}
                           </div>
                         </div>
+                        </DraggableCard>
                       );
                     })}
                     {stageDeals.length === 0 && (
@@ -916,11 +1006,21 @@ export default function CrmBoard() {
                         +{stageDeals.length - 50} mais
                       </div>
                     )}
-                  </div>
+                  </DroppableColumn>
                 </div>
               );
             })}
           </div>
+          <DragOverlay>
+            {draggingDealId ? (
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--accent)', borderRadius: 10, padding: 14, width: 264, opacity: 0.9, boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  {deals.find(d => d.id === draggingDealId)?.marpe_contacts?.name || 'Negócio'}
+                </span>
+              </div>
+            ) : null}
+          </DragOverlay>
+          </DndContext>
         ) : (
           /* ── Grade view (U3: sortable Próxima Ação + all columns) ─────────── */
           <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', padding: isMobile ? '12px 0' : 20 }}>

@@ -85,6 +85,10 @@ export const POST: APIRoute = async ({ request }) => {
 
     if (existingGroup?.id) {
       contactId = existingGroup.id;
+      // Update group name if we got a better one (not a JID)
+      if (groupName && !groupName.includes('@g.us')) {
+        await sb.from('marpe_contacts').update({ name: groupName }).eq('id', existingGroup.id);
+      }
     } else {
       // Create group contact
       const { data: created } = await sb
@@ -327,10 +331,16 @@ async function handleChatbot(opts: {
   // If there was any outbound message in the last 24h, skip greeting
   if (recentOutbound?.id) return;
 
-  // 5. Send the welcome menu
-  const menuText = interpolateVariables(
-    '{{periodo_dia}}! 👋 Bem-vindo à Marca Corretora de Seguros.\n\nComo posso te ajudar?\n\n1️⃣ Cotação de seguro\n2️⃣ Segunda via de boleto\n3️⃣ Sinistro / Assistência 24h\n4️⃣ Informações sobre consórcio\n5️⃣ Falar com um atendente\n\nResponda com o número da opção desejada.',
-  );
+  // 5. Send the welcome menu (configurable from Settings)
+  const { data: menuSetting } = await sb
+    .from('marpe_settings')
+    .select('value')
+    .eq('key', 'chatbot_welcome_message')
+    .maybeSingle();
+
+  const defaultMenu = '{{periodo_dia}}! 👋 Bem-vindo à Marca Corretora de Seguros.\n\nComo posso te ajudar?\n\n1️⃣ Cotação de seguro\n2️⃣ Segunda via de boleto\n3️⃣ Sinistro / Assistência 24h\n4️⃣ Informações sobre consórcio\n5️⃣ Falar com um atendente\n\nResponda com o número da opção desejada.';
+  const menuTemplate = menuSetting?.value?.message || defaultMenu;
+  const menuText = interpolateVariables(menuTemplate);
 
   await sendWhatsAppText(phone, menuText, contactId, { isAutomation: true });
 

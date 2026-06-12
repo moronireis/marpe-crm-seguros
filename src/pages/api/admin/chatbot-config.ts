@@ -16,7 +16,16 @@ export const GET: APIRoute = async ({ locals }) => {
     .maybeSingle();
 
   const enabled = data?.value?.enabled ?? true;
-  return new Response(JSON.stringify({ enabled }), { status: 200 });
+
+  // Also fetch the welcome message
+  const { data: msgData } = await sb
+    .from('marpe_settings')
+    .select('value')
+    .eq('key', 'chatbot_welcome_message')
+    .maybeSingle();
+
+  const welcome_message = msgData?.value?.message || '';
+  return new Response(JSON.stringify({ enabled, welcome_message }), { status: 200 });
 };
 
 export const PATCH: APIRoute = async ({ locals, request }) => {
@@ -36,6 +45,13 @@ export const PATCH: APIRoute = async ({ locals, request }) => {
   await sb
     .from('marpe_settings')
     .upsert({ key: 'chatbot', value: { enabled: body.enabled }, updated_at: new Date().toISOString() });
+
+  // Save welcome message if provided
+  if (typeof body.welcome_message === 'string') {
+    await sb
+      .from('marpe_settings')
+      .upsert({ key: 'chatbot_welcome_message', value: { message: body.welcome_message }, updated_at: new Date().toISOString() });
+  }
 
   return new Response(JSON.stringify({ enabled: body.enabled }), { status: 200 });
 };

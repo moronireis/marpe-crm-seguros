@@ -19,14 +19,14 @@ export const GET: APIRoute = async ({ locals, url }) => {
   // This is the WhatsApp-style conversation list
   const { data: msgContacts, error: msgErr } = await sb
     .from('marpe_messages')
-    .select('contact_id, created_at, body, direction')
+    .select('contact_id, created_at, body, direction, content_type')
     .order('created_at', { ascending: false });
 
   if (msgErr) return new Response(JSON.stringify({ error: msgErr.message }), { status: 500 });
 
   // Deduplicate — keep only the most recent message per contact
   const seen = new Set<string>();
-  const latestByContact: { contact_id: string; body: string; direction: string; created_at: string }[] = [];
+  const latestByContact: { contact_id: string; body: string; direction: string; content_type: string; created_at: string }[] = [];
   for (const m of (msgContacts || [])) {
     if (!seen.has(m.contact_id)) {
       seen.add(m.contact_id);
@@ -70,6 +70,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
         ...contact,
         last_message: m.body,
         last_message_direction: m.direction,
+        last_content_type: m.content_type,
         last_message_at: m.created_at,
       };
     })

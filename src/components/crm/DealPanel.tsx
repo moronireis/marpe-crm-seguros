@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface Stage { id: string; name: string; color: string; sort_order: number; is_terminal?: boolean; terminal_type?: string | null; }
 interface Contact { id: string; name: string; phone: string | null; email: string | null; city: string | null; tags: string[]; }
@@ -67,9 +67,52 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
     return () => mq.removeEventListener('change', handler);
   }, []);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'info' | 'activity'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'activity' | 'chat'>('info');
   const [newNote, setNewNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+
+  // Deal chat state
+  const [chatMsgs, setChatMsgs] = useState<Array<{ id: string; direction: string; body: string | null; content_type: string; created_at: string }>>([]);
+  const [chatText, setChatText] = useState('');
+  const [sendingChat, setSendingChat] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  function loadChat() {
+    if (!dealId) return;
+    fetch(`/api/messages?deal_id=${dealId}`)
+      .then(r => r.json())
+      .then(d => { setChatMsgs(d.messages || []); setTimeout(() => chatEndRef.current?.scrollIntoView(), 50); })
+      .catch(() => {});
+  }
+
+  useEffect(() => { if (activeTab === 'chat') loadChat(); }, [activeTab, dealId]);
+
+  // Poll chat messages when chat tab is active
+  useEffect(() => {
+    if (activeTab !== 'chat') return;
+    const iv = setInterval(loadChat, 5000);
+    return () => clearInterval(iv);
+  }, [activeTab, dealId]);
+
+  async function sendChatMsg() {
+    if (!chatText.trim() || !deal?.marpe_contacts?.phone || sendingChat) return;
+    setSendingChat(true);
+    await fetch('/api/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contact_id: deal.marpe_contacts.id,
+        deal_id: dealId,
+        phone: deal.marpe_contacts.phone,
+        text: chatText,
+      }),
+    });
+    setChatText('');
+    setSendingChat(false);
+    loadChat();
+  }
+
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   // Loss reason modal state
   const [pendingStageId, setPendingStageId] = useState<string | null>(null);
@@ -264,14 +307,69 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <button style={s.tab(activeTab === 'info')} onClick={() => setActiveTab('info')}>Informações</button>
+        <button style={s.tab(activeTab === 'info')} onClick={() => setActiveTab('info')}>Info</button>
+        <button style={s.tab(activeTab === 'chat')} onClick={() => setActiveTab('chat')}>
+          Conversa
+        </button>
         <button style={s.tab(activeTab === 'activity')} onClick={() => setActiveTab('activity')}>
           Atividades ({deal.marpe_deal_activities?.length || 0})
         </button>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
-        {activeTab === 'info' ? (
+      <div style={{ flex: 1, overflowY: activeTab === 'chat' ? 'hidden' : 'auto', padding: activeTab === 'chat' ? 0 : '12px 16px', display: 'flex', flexDirection: 'column' }}>
+        {activeTab === 'chat' ? (
+          /* ── Deal Chat ─────────────────────────────────────── */
+          <>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {chatMsgs.length === 0 && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>
+                  Nenhuma mensagem neste negócio ainda.
+                  <br /><span style={{ fontSize: 11 }}>Envie a primeira mensagem abaixo.</span>
+                </div>
+              )}
+              {chatMsgs.map(m => (
+                <div key={m.id} style={{ alignSelf: m.direction === 'outbound' ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
+                  <div style={{
+                    padding: '8px 12px', borderRadius: 10,
+                    background: m.direction === 'outbound' ? 'var(--accent-dim)' : 'var(--bg-card)',
+                    border: `1px solid ${m.direction === 'outbound' ? 'rgba(59,130,246,0.2)' : 'var(--border)'}`,
+                    borderBottomRightRadius: m.direction === 'outbound' ? 4 : 10,
+                    borderBottomLeftRadius: m.direction === 'inbound' ? 4 : 10,
+                  }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.body || `[${m.content_type}]`}</div>
+                    <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4, textAlign: 'right' }}>
+                      {new Date(m.created_at).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+            {deal.marpe_contacts?.phone ? (
+              <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', gap: 6, flexShrink: 0 }}>
+                <input
+                  ref={chatInputRef}
+                  value={chatText}
+                  onChange={e => setChatText(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMsg(); } }}
+                  placeholder="Mensagem sobre este negócio..."
+                  style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit' }}
+                />
+                <button
+                  onClick={sendChatMsg}
+                  disabled={sendingChat || !chatText.trim()}
+                  style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', opacity: sendingChat ? 0.6 : 1 }}
+                >
+                  Enviar
+                </button>
+              </div>
+            ) : (
+              <div style={{ padding: 12, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', borderTop: '1px solid var(--border)' }}>
+                Contato sem telefone registrado
+              </div>
+            )}
+          </>
+        ) : activeTab === 'info' ? (
           <>
             {contact && (
               <>

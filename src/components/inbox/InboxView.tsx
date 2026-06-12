@@ -40,15 +40,34 @@ function MessageContent({ m }: { m: Message }) {
   }
 
   if (content_type === 'audio') {
+    // UazapiGO audio is typically ogg/opus (WhatsApp ptt) — ensure correct MIME
+    const audioMime = media_mime || 'audio/ogg; codecs=opus';
     return (
       <div>
         {media_url ? (
-          <audio controls style={{ width: '100%', maxWidth: 280, height: 36, outline: 'none', display: 'block' }}>
-            <source src={media_url} type={media_mime || 'audio/ogg'} />
-            <a href={media_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontSize: 12 }}>Ouvir áudio</a>
-          </audio>
+          <>
+            <audio
+              controls
+              preload="metadata"
+              crossOrigin="anonymous"
+              style={{ width: '100%', maxWidth: 280, height: 36, outline: 'none', display: 'block' }}
+              onError={(e) => {
+                // If audio fails to load, show fallback link
+                const el = e.currentTarget;
+                el.style.display = 'none';
+                const fallback = el.nextElementSibling as HTMLElement | null;
+                if (fallback) fallback.style.display = 'flex';
+              }}
+            >
+              <source src={media_url} type={audioMime} />
+            </audio>
+            <div style={{ display: 'none', alignItems: 'center', gap: 8 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+              <a href={media_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontSize: 12 }}>Abrir audio</a>
+            </div>
+          </>
         ) : (
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>Áudio indisponível</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>Audio indisponivel</span>
         )}
         {body && <div style={{ marginTop: 6, fontSize: 13 }}>{body}</div>}
       </div>
@@ -118,6 +137,13 @@ const TAG_COLORS: Record<string, { bg: string; color: string }> = {
   equipamento: { bg: 'rgba(6,182,212,0.12)', color: '#22d3ee' },
 };
 
+function displayName(c: Contact): string {
+  // Clean up group JIDs shown as names
+  if (c.name && c.name.includes('@g.us')) return 'Grupo ' + c.name.replace('@g.us', '').slice(-8);
+  if (c.name && /^\d{10,}$/.test(c.name)) return c.phone || c.name;
+  return c.name || c.phone || '—';
+}
+
 function getInitials(name: string): string {
   const parts = name.trim().split(' ');
   if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
@@ -157,6 +183,14 @@ export default function InboxView() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [waConnected, setWaConnected] = useState<boolean | null>(null);
+  // CRM panel — editable contact fields
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editCity, setEditCity] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [savingContact, setSavingContact] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Check WhatsApp connection status
   useEffect(() => {
@@ -243,6 +277,31 @@ export default function InboxView() {
     setMessages([]);
   }, [activeTab]);
 
+  // Auto-select contact from URL query param (?contact=ID)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const contactParam = params.get('contact');
+    if (contactParam) {
+      setActiveContactId(contactParam);
+      // Clean URL without reloading
+      const url = new URL(window.location.href);
+      url.searchParams.delete('contact');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    }
+  }, []);
+
+  // Populate editable fields when active contact changes
+  useEffect(() => {
+    if (activeContact) {
+      setEditName(activeContact.name || '');
+      setEditPhone(activeContact.phone || '');
+      setEditEmail(activeContact.email || '');
+      setEditCity(activeContact.city || '');
+      setEditNotes('');
+      setSaveSuccess(false);
+    }
+  }, [activeContactId]);
+
   const activeContact = contacts.find(c => c.id === activeContactId);
   const isGroupContact = (activeContact as any)?.source === 'whatsapp_group';
 
@@ -281,6 +340,38 @@ export default function InboxView() {
     marketing: 'Marketing', 'pos-venda': 'Pós-venda', relacionamento: 'Relacionamento',
     renovacao: 'Renovação', sinistro: 'Sinistro',
   };
+
+  async function saveContact() {
+    if (!activeContactId) return;
+    setSavingContact(true);
+    setSaveSuccess(false);
+    try {
+      const res = await fetch(`/api/contacts/${activeContactId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim() || undefined,
+          phone: editPhone.trim() || undefined,
+          email: editEmail.trim() || undefined,
+          city: editCity.trim() || undefined,
+          notes: editNotes.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        setSaveSuccess(true);
+        // Update local contacts list with new data
+        setContacts(prev => prev.map(c => c.id === activeContactId ? {
+          ...c,
+          name: editName.trim() || c.name,
+          phone: editPhone.trim() || c.phone,
+          email: editEmail.trim() || c.email,
+          city: editCity.trim() || c.city,
+        } : c));
+        setTimeout(() => setSaveSuccess(false), 2000);
+      }
+    } catch {}
+    setSavingContact(false);
+  }
 
   async function sendMessage() {
     if (!newMsg.trim() || !activeContact?.phone) return;
@@ -376,10 +467,14 @@ export default function InboxView() {
                 <div style={{ width: 40, height: 40, borderRadius: isGroup ? 10 : '50%', background: isGroup ? 'rgba(6,182,212,0.15)' : '#1e1e30', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: isGroup ? '#22d3ee' : nameColor(c.name), border: isGroup ? '1px solid rgba(6,182,212,0.3)' : 'none' }}>
                   {isGroup ? 'G' : getInitials(c.name)}
                 </div>
+                {/* Unread dot — shown when last message is inbound (client sent, team hasn't replied) */}
+                {c.last_message_direction === 'inbound' && activeContactId !== c.id && (
+                  <div style={{ position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--bg-secondary)', boxSizing: 'content-box' }} />
+                )}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{c.name}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{displayName(c)}</div>
                   {c.last_message_at && <div style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0, marginLeft: 6 }}>{formatTime(c.last_message_at)}</div>}
                 </div>
                 {mediaLabel && !preview ? (
@@ -532,19 +627,68 @@ export default function InboxView() {
       {/* CRM Side Panel — hidden on mobile */}
       {activeContact && !isMobile && (
         <div style={{ width: 300, borderLeft: '1px solid var(--border)', background: 'var(--bg-secondary)', flexShrink: 0, overflowY: 'auto', padding: '14px 18px' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 16 }}>Dados do Contato</div>
-          {[
-            ['Nome', activeContact.name],
-            ['Telefone', activeContact.phone],
-            ['E-mail', activeContact.email],
-            ['Cidade', activeContact.city],
-            ['Corp ID', activeContact.corp_id],
-          ].filter(([, v]) => v).map(([k, v]) => (
-            <div key={k as string} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid rgba(26,26,42,0.3)' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{k}</span>
-              <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Dados do Contato</div>
+            <a href={`/contato/${activeContact.id}`} style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }}>Ver perfil</a>
+          </div>
+
+          {/* Editable fields */}
+          {([
+            ['Nome', editName, setEditName, 'text'],
+            ['Telefone', editPhone, setEditPhone, 'tel'],
+            ['E-mail', editEmail, setEditEmail, 'email'],
+            ['Cidade', editCity, setEditCity, 'text'],
+          ] as [string, string, (v: string) => void, string][]).map(([label, value, setter, type]) => (
+            <div key={label} style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 3 }}>{label}</label>
+              <input
+                value={value}
+                onChange={e => setter(e.target.value)}
+                type={type}
+                placeholder={`${label}...`}
+                style={{ width: '100%', padding: '7px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+              />
             </div>
           ))}
+
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 3 }}>Observacoes</label>
+            <textarea
+              value={editNotes}
+              onChange={e => setEditNotes(e.target.value)}
+              placeholder="Notas sobre o contato..."
+              rows={3}
+              style={{ width: '100%', padding: '7px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }}
+            />
+          </div>
+
+          <button
+            onClick={saveContact}
+            disabled={savingContact}
+            style={{ width: '100%', padding: '8px 0', background: saveSuccess ? 'rgba(34,197,94,0.15)' : 'var(--accent)', color: saveSuccess ? '#4ade80' : '#fff', border: saveSuccess ? '1px solid rgba(34,197,94,0.3)' : 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: savingContact ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: savingContact ? 0.6 : 1, transition: 'all 0.2s' }}
+          >
+            {savingContact ? 'Salvando...' : saveSuccess ? 'Salvo!' : 'Salvar'}
+          </button>
+
+          {activeContact.corp_id && (
+            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderTop: '1px solid rgba(26,26,42,0.3)' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Corp ID</span>
+              <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{activeContact.corp_id}</span>
+            </div>
+          )}
+
+          {activeContact.tags && activeContact.tags.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Tags</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {activeContact.tags.map(tag => {
+                  const tc = TAG_COLORS[tag] || { bg: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)' };
+                  return <span key={tag} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: tc.bg, color: tc.color }}>{tag}</span>;
+                })}
+              </div>
+            </div>
+          )}
+
           <div style={{ marginTop: 16, fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Mensagens</div>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{messages.length} mensagem{messages.length !== 1 ? 's' : ''} no historico</div>
         </div>

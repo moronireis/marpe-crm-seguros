@@ -659,11 +659,47 @@ export default function ConfigView() {
   // Chatbot toggle state
   const [chatbotEnabled, setChatbotEnabled] = useState<boolean | null>(null);
   const [togglingChatbot, setTogglingChatbot] = useState(false);
+  const [welcomeMsg, setWelcomeMsg] = useState('');
+  const [savingWelcome, setSavingWelcome] = useState(false);
+
+  async function saveWelcomeMsg() {
+    setSavingWelcome(true);
+    await fetch('/api/admin/chatbot-config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: chatbotEnabled ?? true, welcome_message: welcomeMsg }),
+    });
+    setSavingWelcome(false);
+  }
+
+  // New user form
+  const [showNewUser, setShowNewUser] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [newUserError, setNewUserError] = useState('');
+  const [newUserForm, setNewUserForm] = useState({ email: '', password: '', full_name: '', role: 'operador' });
+
+  async function createUser() {
+    setCreatingUser(true);
+    setNewUserError('');
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUserForm),
+      });
+      const d = await res.json();
+      if (!res.ok) { setNewUserError(d.error || 'Erro ao criar'); return; }
+      setShowNewUser(false);
+      setNewUserForm({ email: '', password: '', full_name: '', role: 'operador' });
+      loadUsers();
+    } catch { setNewUserError('Erro de conexão'); }
+    finally { setCreatingUser(false); }
+  }
 
   function loadChatbotConfig() {
     fetch('/api/admin/chatbot-config')
       .then(r => r.json())
-      .then(d => setChatbotEnabled(d.enabled ?? true))
+      .then(d => { setChatbotEnabled(d.enabled ?? true); setWelcomeMsg(d.welcome_message || ''); })
       .catch(() => setChatbotEnabled(true));
   }
 
@@ -859,15 +895,37 @@ export default function ConfigView() {
                 </button>
               </div>
               {chatbotEnabled && (
-                <div style={{ marginTop: 14, padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                    <strong style={{ color: 'var(--text-secondary)' }}>Regras ativas:</strong><br />
-                    • Envia menu apenas uma vez por contato a cada 24h<br />
-                    • Silencia automaticamente quando um atendente responde<br />
-                    • Nunca responde a grupos de WhatsApp<br />
-                    • Marca contatos com tags de interesse automaticamente
+                <>
+                  <div style={{ marginTop: 14, padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 6, border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                      <strong style={{ color: 'var(--text-secondary)' }}>Regras ativas:</strong><br />
+                      • Envia menu apenas uma vez por contato a cada 24h<br />
+                      • Silencia automaticamente quando um atendente responde<br />
+                      • Nunca responde a grupos de WhatsApp<br />
+                      • Marca contatos com tags de interesse automaticamente
+                    </div>
                   </div>
-                </div>
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Mensagem de boas-vindas</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+                      Use {'{{periodo_dia}}'} para saudação automática (Bom dia/Boa tarde/Boa noite). Deixe vazio para usar a mensagem padrão.
+                    </div>
+                    <textarea
+                      value={welcomeMsg}
+                      onChange={e => setWelcomeMsg(e.target.value)}
+                      rows={6}
+                      placeholder="{{periodo_dia}}! 👋 Bem-vindo à Marca Corretora de Seguros.&#10;&#10;Como posso te ajudar?&#10;&#10;1️⃣ Cotação de seguro&#10;2️⃣ Segunda via de boleto&#10;3️⃣ Sinistro / Assistência 24h&#10;4️⃣ Informações sobre consórcio&#10;5️⃣ Falar com um atendente&#10;&#10;Responda com o número da opção desejada."
+                      style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
+                    />
+                    <button
+                      onClick={saveWelcomeMsg}
+                      disabled={savingWelcome}
+                      style={{ marginTop: 8, padding: '7px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500, opacity: savingWelcome ? 0.6 : 1 }}
+                    >
+                      {savingWelcome ? 'Salvando...' : 'Salvar mensagem'}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -944,7 +1002,52 @@ export default function ConfigView() {
 
         {activeTab === 'users' && (
           <div style={{ maxWidth: 600 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Usuários da plataforma</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>Usuários da plataforma</div>
+              <button
+                onClick={() => setShowNewUser(v => !v)}
+                style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)', background: showNewUser ? 'var(--accent-dim)' : 'transparent', color: showNewUser ? 'var(--accent-light)' : 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}
+              >
+                {showNewUser ? 'Cancelar' : '+ Novo usuário'}
+              </button>
+            </div>
+
+            {showNewUser && (
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Nome</label>
+                    <input value={newUserForm.full_name} onChange={e => setNewUserForm(f => ({ ...f, full_name: e.target.value }))} placeholder="Nome completo" style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Perfil</label>
+                    <select value={newUserForm.role} onChange={e => setNewUserForm(f => ({ ...f, role: e.target.value }))} style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', cursor: 'pointer' }}>
+                      <option value="operador">Operador</option>
+                      <option value="admin">Administrador</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>E-mail</label>
+                    <input type="email" value={newUserForm.email} onChange={e => setNewUserForm(f => ({ ...f, email: e.target.value }))} placeholder="email@empresa.com" style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Senha</label>
+                    <input type="password" value={newUserForm.password} onChange={e => setNewUserForm(f => ({ ...f, password: e.target.value }))} placeholder="Mín. 6 caracteres" style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' }} />
+                  </div>
+                </div>
+                {newUserError && <div style={{ fontSize: 12, color: '#f87171', marginBottom: 8 }}>{newUserError}</div>}
+                <button
+                  onClick={createUser}
+                  disabled={creatingUser || !newUserForm.email || !newUserForm.password}
+                  style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500, opacity: creatingUser ? 0.6 : 1 }}
+                >
+                  {creatingUser ? 'Criando...' : 'Criar usuário'}
+                </button>
+              </div>
+            )}
+
             {loadingUsers ? (
               <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando...</div>
             ) : users.map(u => (
