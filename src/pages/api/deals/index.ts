@@ -57,10 +57,36 @@ export const POST: APIRoute = async ({ locals, request }) => {
       vigencia_fim: body.vigencia_fim || null,
       deal_type: body.deal_type || 'renovacao',
       responsible_id: profile.id,
+      // New fields (Fase 2)
+      created_by: profile.id,
+      campanha: body.campanha || null,
+      ja_possui_produto: body.ja_possui_produto ?? false,
+      seguradora_atual: body.seguradora_atual || null,
+      vigencia_atual_fim: body.vigencia_atual_fim || null,
+      corretora_atual: body.corretora_atual || null,
+      base_calculo_repasse: body.base_calculo_repasse || null,
+      pct_repasse: body.pct_repasse || null,
+      valor_repasse: body.valor_repasse || null,
+      agente: body.agente || null,
+      observacoes_proposta: body.observacoes_proposta || null,
+      veiculo: body.veiculo || null,
+      placa: body.placa || null,
+      next_action: body.next_action || null,
+      next_action_date: body.next_action_date || null,
     })
     .select('*, marpe_contacts(id, name, phone), marpe_funnel_stages(id, name, color)')
     .single();
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+
+  // Log creation activity
+  await sb.from('marpe_deal_activities').insert({
+    deal_id: data.id,
+    user_id: profile.id,
+    type: 'creation',
+    description: 'Negócio criado',
+    metadata: { contact_name: data.marpe_contacts?.name || null },
+  }).catch(() => {});
+
   return new Response(JSON.stringify({ deal: data }), { status: 201 });
 };

@@ -1,5 +1,6 @@
 import { createServerClient } from '../supabase-server';
 import { listClientes, getCliente, listDocumentos, listNegociosAndamento, listRamos, listProdutores } from './client';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 function formatPhone(ddd: number | null, numero: string | null): string | null {
   if (!numero) return null;
@@ -64,7 +65,12 @@ export async function syncClientes(): Promise<SyncResult> {
   for (let i = 0; i < toUpdate.length; i += BATCH) {
     const batch = toUpdate.slice(i, i + BATCH);
     const results = await Promise.all(
-      batch.map(u => sb.from('marpe_contacts').update({ name: u.name, phone: u.phone }).eq('id', u.id))
+      batch.map(u => {
+        // Never overwrite an existing phone with null — only update when Corp has a value
+        const upd: Record<string, any> = { name: u.name };
+        if (u.phone) upd.phone = u.phone;
+        return sb.from('marpe_contacts').update(upd).eq('id', u.id);
+      })
     );
     for (const r of results) {
       if (r.error) result.errors.push(`Update: ${r.error.message}`);
@@ -218,6 +224,192 @@ function daysAgoStr(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// ── Per-contact real-time sync ────────────────────────────────────────────────
+// Syncs a single Corp client's data + their deals/documents immediately.
+// Called from the "Sincronizar Corp" button in the UI.
+export async function syncContactByCorpId(corpId: number): Promise<{
+  contact: SyncResult;
+  deals: SyncResult;
+  errors: string[];
+}> {
+  const sb = createServerClient();
+  const contactResult: SyncResult = { type: 'contact', created: 0, updated: 0, skipped: 0, errors: [] };
+  const dealsResult: SyncResult  = { type: 'deals',   created: 0, updated: 0, skipped: 0, errors: [] };
+  const allErrors: string[] = [];
+
+  // ── 1. Contact data ──────────────────────────────────────────────────────────
+  let detail: Awaited<ReturnType<typeof getCliente>>;
+  try {
+    detail = await getCliente(corpId);
+  } catch (e: any) {
+    allErrors.push(`getCliente: ${e.message}`);
+    return { contact: contactResult, deals: dealsResult, errors: allErrors };
+  }
+  if (!detail) {
+    allErrors.push(`Corp client ${corpId} not found`);
+    return { contact: contactResult, deals: dealsResult, errors: allErrors };
+  }
+
+  // Get phone: detail.telefone first, then search lista_clientes by name
+  let phone: string | null = detail.telefone || null;
+  if (!phone) {
+    try {
+      const { clientes } = await listClientes(detail.nome.split(' ')[0]);
+      const match = clientes.find(c => c.codigo === corpId);
+      if (match) phone = formatPhone(match.ddd, match.numero);
+    } catch {}
+  }
+
+  // Find existing contact in Supabase
+  const { data: existing } = await sb
+    .from('marpe_contacts')
+    .select('id, phone')
+    .eq('corp_id', String(corpId))
+    .maybeSingle();
+
+  // Build update payload — never overwrite non-null phone with null
+  const contactPayload: Record<string, any> = {
+    name: detail.nome,
+    email: detail.email || null,
+    city: detail.cidade || null,
+    state: detail.estado || 'RS',
+    corp_id: String(corpId),
+    source: 'corp_sync',
+    updated_at: new Date().toISOString(),
+  };
+  if (detail.cpf_cnpj) contactPayload.cpf_cnpj = detail.cpf_cnpj;
+  if (detail.datanas)  contactPayload.birth_date = parseCorpDate(detail.datanas);
+  if (detail.profissao) contactPayload.profession = detail.profissao;
+  if (detail.estado_civil) contactPayload.marital_status = detail.estado_civil;
+  if (detail.enderecos?.[0]) {
+    const end = detail.enderecos[0];
+    contactPayload.address = `${end.logradouro}, ${end.numero}`;
+  }
+  // Only set phone if Corp has one, or if there's no phone yet in Supabase
+  if (phone) {
+    contactPayload.phone = phone;
+  } else if (existing?.phone) {
+    // Keep existing phone — don't include it in the update
+  }
+
+  if (existing?.id) {
+    const { error } = await sb.from('marpe_contacts').update(contactPayload).eq('id', existing.id);
+    if (error) contactResult.errors.push(error.message);
+    else contactResult.updated++;
+  } else {
+    const { error } = await sb.from('marpe_contacts').insert({ ...contactPayload, phone });
+    if (error) contactResult.errors.push(error.message);
+    else contactResult.created++;
+  }
+
+  // Get the contact ID for deal linking
+  const { data: contactRow } = await sb
+    .from('marpe_contacts')
+    .select('id')
+    .eq('corp_id', String(corpId))
+    .maybeSingle();
+  const contactDbId = contactRow?.id;
+  if (!contactDbId) {
+    allErrors.push('Contact not found in DB after upsert');
+    return { contact: contactResult, deals: dealsResult, errors: allErrors };
+  }
+
+  // ── 2. Funnels/stages ────────────────────────────────────────────────────────
+  const { data: vendasFunnel } = await sb.from('marpe_funnels').select('id').eq('name', 'Vendas').maybeSingle();
+  const { data: emitidoStage } = await sb.from('marpe_funnel_stages').select('id')
+    .eq('funnel_id', vendasFunnel?.id || '').eq('name', 'Emitido').maybeSingle();
+  const { data: stagesAll } = await sb.from('marpe_funnel_stages').select('id, name, sort_order')
+    .eq('funnel_id', vendasFunnel?.id || '').order('sort_order');
+  const prospeccaoStage = stagesAll?.find(s => s.name === 'Prospecção');
+
+  // ── 3. Negocios (active negotiations) — filter for this client ───────────────
+  if (vendasFunnel?.id && prospeccaoStage) {
+    try {
+      let pag = 1;
+      let total = 0;
+      do {
+        const { count, negocios } = await listNegociosAndamento({ pag, qtd_pag: 100 });
+        total = count;
+        const mine = negocios.filter(n => n.codcli === corpId);
+        for (const neg of mine) {
+          const corpNegId = `neg_${neg.codfil}_${neg.codigo}`;
+          const { data: existingDeal } = await sb.from('marpe_deals').select('id').eq('corp_id', corpNegId).maybeSingle();
+          const dealData = {
+            contact_id: contactDbId,
+            funnel_id: vendasFunnel.id,
+            stage_id: prospeccaoStage.id,
+            title: `${neg.ramo || 'Negócio'} — ${neg.cliente}`,
+            ramo: neg.ramo?.toLowerCase() || null,
+            premio: neg.val_premio || null,
+            comissao_valor: neg.val_c || null,
+            deal_type: neg.tipo_neg?.toLowerCase()?.includes('renova') ? 'renovacao' : 'prospeccao',
+            corp_id: corpNegId,
+          };
+          if (existingDeal?.id) {
+            const { error } = await sb.from('marpe_deals').update(dealData).eq('id', existingDeal.id);
+            if (error) dealsResult.errors.push(`negocio ${neg.codigo}: ${error.message}`);
+            else dealsResult.updated++;
+          } else {
+            const { error } = await sb.from('marpe_deals').insert(dealData);
+            if (error) dealsResult.errors.push(`negocio ${neg.codigo}: ${error.message}`);
+            else dealsResult.created++;
+          }
+        }
+        pag++;
+      } while ((pag - 1) * 100 < total && pag <= 20); // max 20 pages
+    } catch (e: any) {
+      dealsResult.errors.push(`negocios: ${e.message}`);
+    }
+  }
+
+  // ── 4. Documents (last 5 years) — filter for this client ─────────────────────
+  if (vendasFunnel?.id && emitidoStage?.id) {
+    try {
+      const datini = daysAgoStr(365 * 5);
+      const datfim = todayStr();
+      let pag = 1;
+      let total = 0;
+      do {
+        const { count, documentos } = await listDocumentos({ datini, datfim, pag, qtd_pag: 100 });
+        total = count;
+        const mine = documentos.filter(d => d.cliente_codigo === corpId);
+        for (const doc of mine) {
+          const corpDocId = `doc_${doc.codfil}_${doc.nosnum}`;
+          const { data: existingDeal } = await sb.from('marpe_deals').select('id').eq('corp_id', corpDocId).maybeSingle();
+          const dealData = {
+            contact_id: contactDbId,
+            funnel_id: vendasFunnel.id,
+            stage_id: emitidoStage.id,
+            title: `${doc.ramo} — ${doc.cliente}`,
+            ramo: doc.ramo?.toLowerCase() || null,
+            seguradora: doc.seguradora || null,
+            apolice: doc.numapo || null,
+            vigencia_inicio: parseCorpDate(doc.inivig),
+            vigencia_fim: parseCorpDate(doc.fimvig),
+            deal_type: 'prospeccao',
+            corp_id: corpDocId,
+          };
+          if (existingDeal?.id) {
+            const { error } = await sb.from('marpe_deals').update(dealData).eq('id', existingDeal.id);
+            if (error) dealsResult.errors.push(`doc ${doc.nosnum}: ${error.message}`);
+            else dealsResult.updated++;
+          } else {
+            const { error } = await sb.from('marpe_deals').insert(dealData);
+            if (error) dealsResult.errors.push(`doc ${doc.nosnum}: ${error.message}`);
+            else dealsResult.created++;
+          }
+        }
+        pag++;
+      } while ((pag - 1) * 100 < total && pag <= 50); // max 50 pages (5000 docs)
+    } catch (e: any) {
+      dealsResult.errors.push(`documentos: ${e.message}`);
+    }
+  }
+
+  allErrors.push(...contactResult.errors, ...dealsResult.errors);
+  return { contact: contactResult, deals: dealsResult, errors: allErrors };
 }
 
 export async function syncAll(): Promise<SyncResult[]> {

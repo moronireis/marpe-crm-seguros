@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
 import { interpolateVariables } from '../../../lib/variables';
+import { normalizePhone } from '../../../lib/whatsapp/send';
 
 export const prerender = false;
 
@@ -14,10 +15,28 @@ export const GET: APIRoute = async ({ locals, url }) => {
   const dealId = url.searchParams.get('deal_id');
   if (!contactId && !dealId) return new Response(JSON.stringify({ error: 'contact_id or deal_id required' }), { status: 400 });
 
+  // Optional filters
+  const dateFrom = url.searchParams.get('date_from');
+  const dateTo = url.searchParams.get('date_to');
+  const sentBy = url.searchParams.get('sent_by');
+  const search = url.searchParams.get('search');
+  const limit = parseInt(url.searchParams.get('limit') || '200');
+
   const sb = createServerClient();
-  let query = sb.from('marpe_messages').select('*').order('created_at', { ascending: true }).limit(200);
+  let query = sb.from('marpe_messages').select('*').order('created_at', { ascending: true }).limit(limit);
   if (dealId) query = query.eq('deal_id', dealId);
   else if (contactId) query = query.eq('contact_id', contactId);
+
+  // Date range filters
+  if (dateFrom) query = query.gte('created_at', dateFrom);
+  if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59.999Z');
+
+  // Filter by sender (user_id who sent)
+  if (sentBy) query = query.eq('sent_by', sentBy);
+
+  // Text search in message body
+  if (search) query = query.ilike('body', `%${search}%`);
+
   const { data, error } = await query;
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
@@ -58,11 +77,17 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const UAZAPI_URL = import.meta.env.UAZAPI_URL || 'https://u4digital.uazapi.com';
   const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN || '';
 
+  // Group JIDs (ending in @g.us) must be sent as-is to UazapiGO.
+  // Individual numbers go through normalizePhone to ensure correct country-code format.
+  const phoneForSend = body.phone.endsWith('@g.us')
+    ? body.phone
+    : normalizePhone(body.phone);
+
   // Send via UaZapi
   const uaRes = await fetch(`${UAZAPI_URL}/send/text?token=${UAZAPI_TOKEN}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ number: body.phone.replace(/\D/g, ''), text: finalText }),
+    body: JSON.stringify({ number: phoneForSend, text: finalText }),
   });
 
   const uaData = await uaRes.json().catch(() => ({}));
