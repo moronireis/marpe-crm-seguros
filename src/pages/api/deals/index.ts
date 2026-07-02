@@ -10,20 +10,25 @@ export const GET: APIRoute = async ({ locals, url }) => {
 
   const sb = createServerClient();
   const funnelId = url.searchParams.get('funnel_id');
-  const limit = parseInt(url.searchParams.get('limit') || '500');
 
-  let query = sb.from('marpe_deals')
-    .select('*, marpe_contacts(id, name, phone, email, tags), marpe_funnel_stages(id, name, color, sort_order, is_terminal, terminal_type), marpe_profiles!responsible_id(id, full_name)')
-    .order('created_at', { ascending: false })
-    .limit(limit);
+  // Fetch ALL deals of the funnel — Supabase caps each request at 1000 rows,
+  // so paginate server-side. (A fixed limit of 500 hid ~90% of the 4.5k deals.)
+  const PAGE_SIZE = 1000;
+  const all: any[] = [];
+  for (let page = 0; ; page++) {
+    let query = sb.from('marpe_deals')
+      .select('*, marpe_contacts(id, name, phone, email, tags), marpe_funnel_stages(id, name, color, sort_order, is_terminal, terminal_type), marpe_profiles!responsible_id(id, full_name)')
+      .order('created_at', { ascending: false })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    if (funnelId) query = query.eq('funnel_id', funnelId);
 
-  if (funnelId) {
-    query = query.eq('funnel_id', funnelId);
+    const { data, error } = await query;
+    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    all.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) break;
   }
 
-  const { data, error } = await query;
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  return new Response(JSON.stringify({ deals: data }), { status: 200 });
+  return new Response(JSON.stringify({ deals: all }), { status: 200 });
 };
 
 export const POST: APIRoute = async ({ locals, request }) => {

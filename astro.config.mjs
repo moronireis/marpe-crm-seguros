@@ -9,7 +9,9 @@ export default defineConfig({
   security: {
     checkOrigin: false
   },
-  adapter: vercel(),
+  // maxDuration 300s: the nightly Corp full sync (corp-sync) fetches ~200 negocio
+  // details + thousands of upserts and can exceed the 60s default.
+  adapter: vercel({ maxDuration: 300 }),
   vite: {
     plugins: [tailwindcss()]
   },

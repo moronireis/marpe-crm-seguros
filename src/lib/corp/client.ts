@@ -1,4 +1,4 @@
-import type { CorpLoginResponse, CorpCliente, CorpClienteDetail, CorpDocumento, CorpNegocio, CorpRamo, CorpProdutor } from './types';
+import type { CorpLoginResponse, CorpCliente, CorpClienteDetail, CorpDocumento, CorpNegocio, CorpNegocioDetail, CorpRamo, CorpProdutor } from './types';
 
 const CORP_URL = import.meta.env.CORP_API_URL || 'https://api.corpnuvem.com';
 const CORP_EMAIL = import.meta.env.CORP_API_EMAIL || '';
@@ -104,8 +104,11 @@ export async function listNegociosAndamento(opts?: {
   return { count: data.header?.count || 0, negocios: data.negocios || data.negocios_andamento || [] };
 }
 
-export async function getNegocio(codigo: number): Promise<any> {
-  return corpFetch('/negocio', { codfil: String(CODFIL), codigo: String(codigo) });
+export async function getNegocio(codigo: number): Promise<CorpNegocioDetail | null> {
+  const data = await corpFetch<{ header: { count: number }; negocio: CorpNegocioDetail[] }>('/negocio', {
+    codfil: String(CODFIL), codigo: String(codigo),
+  });
+  return data.negocio?.[0] || null;
 }
 
 // ===== SINISTROS =====

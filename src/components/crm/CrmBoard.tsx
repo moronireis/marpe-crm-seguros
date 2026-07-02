@@ -924,6 +924,9 @@ export default function CrmBoard() {
   const [loading, setLoading] = useState(true);
   const [activeDealId, setActiveDealId] = useState<string | null>(null);
   const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
+  // Per-column render cap (Emitido has 4k+ deals — rendering all would freeze the DOM)
+  const [visibleByStage, setVisibleByStage] = useState<Record<string, number>>({});
+  const COLUMN_PAGE = 50;
   const [showNewDeal, setShowNewDeal] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -1028,15 +1031,27 @@ export default function CrmBoard() {
       .catch(() => {});
   }, [funnels]);
 
+  // Bumped when the light Corp sync finishes — re-runs the deals load below
+  const [syncTick, setSyncTick] = useState(0);
+
   // Load deals
   useEffect(() => {
     if (!activeFunnelId) return;
     setLoading(true);
-    fetch(`/api/deals?funnel_id=${activeFunnelId}&limit=500`)
+    fetch(`/api/deals?funnel_id=${activeFunnelId}`)
       .then(r => r.json())
       .then(d => { setDeals(d.deals || []); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [activeFunnelId]);
+  }, [activeFunnelId, syncTick]);
+
+  // Near-real-time Corp sync: fire-and-forget on board load (endpoint self-throttles
+  // to 1 run / 10 min). When it actually synced, refresh the board with fresh data.
+  useEffect(() => {
+    fetch('/api/corp/sync-light', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => { if (d.synced) setSyncTick(t => t + 1); })
+      .catch(() => {});
+  }, []);
 
   // Debounce search input
   useEffect(() => {
@@ -1050,7 +1065,7 @@ export default function CrmBoard() {
 
   function reloadDeals() {
     if (!activeFunnelId) return;
-    fetch(`/api/deals?funnel_id=${activeFunnelId}&limit=500`)
+    fetch(`/api/deals?funnel_id=${activeFunnelId}`)
       .then(r => r.json())
       .then(d => setDeals(d.deals || []));
   }
@@ -1391,7 +1406,7 @@ export default function CrmBoard() {
                     </div>
                     {/* Fix 9: scrollable area */}
                     <DroppableColumn id={stage.id}>
-                      {stageDeals.slice(0, 50).map(d => {
+                      {stageDeals.slice(0, visibleByStage[stage.id] || COLUMN_PAGE).map(d => {
                         const r = RAMO_COLORS[d.ramo?.toLowerCase() || ''] || { bg: 'var(--border)', color: 'var(--text-muted)' };
                         const urgency = nextActionUrgency(d.next_action_date);
                         return (
@@ -1423,14 +1438,14 @@ export default function CrmBoard() {
                                 )}
                               </div>
                               {d.seguradora && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{d.seguradora}</div>}
-                              {/* Fix 10: status badge always visible — removed any hover dependency */}
+                              {/* Status badge — neutral, no colors (client request: cores no status não agregam) */}
                               {d.status_custom && (
                                 <div style={{ marginBottom: 6 }}>
                                   <span style={{
                                     fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 100,
-                                    background: d.status_color ? `${d.status_color}22` : 'rgba(255,255,255,0.06)',
-                                    color: d.status_color || 'var(--text-muted)',
-                                    border: `1px solid ${d.status_color ? `${d.status_color}44` : 'var(--border)'}`,
+                                    background: 'rgba(255,255,255,0.06)',
+                                    color: 'var(--text-secondary)',
+                                    border: '1px solid var(--border)',
                                     display: 'inline-block',
                                   }}>
                                     {d.status_custom}
@@ -1455,10 +1470,17 @@ export default function CrmBoard() {
                           {isFiltering ? 'Nenhum resultado' : 'Nenhum negócio'}
                         </div>
                       )}
-                      {stageDeals.length > 50 && (
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 8 }}>
-                          +{stageDeals.length - 50} mais
-                        </div>
+                      {stageDeals.length > (visibleByStage[stage.id] || COLUMN_PAGE) && (
+                        <button
+                          onClick={() => setVisibleByStage(v => ({ ...v, [stage.id]: (v[stage.id] || COLUMN_PAGE) + 100 }))}
+                          style={{
+                            fontSize: 11, color: 'var(--accent-light)', textAlign: 'center', padding: '8px 12px',
+                            background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
+                            cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+                          }}
+                        >
+                          Mostrar mais ({stageDeals.length - (visibleByStage[stage.id] || COLUMN_PAGE)} restantes)
+                        </button>
                       )}
                     </DroppableColumn>
                   </div>

@@ -31,7 +31,12 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
   const [showFilters, setShowFilters] = useState(false);
 
   function buildUrl() {
-    let url = `/api/messages?deal_id=${dealId}`;
+    // Query by contact: the WhatsApp thread belongs to the person. Inbound messages
+    // arrive by phone number and never carry deal_id, so filtering by deal_id showed
+    // an empty conversation on most deals. Fallback to deal_id when contact is missing.
+    let url = contactId
+      ? `/api/messages?contact_id=${contactId}`
+      : `/api/messages?deal_id=${dealId}`;
     if (dateFrom) url += `&date_from=${dateFrom}`;
     if (dateTo) url += `&date_to=${dateTo}`;
     if (search.trim()) url += `&search=${encodeURIComponent(search.trim())}`;
@@ -49,13 +54,13 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
       .catch(() => setLoading(false));
   }
 
-  useEffect(() => { loadMessages(); }, [dealId]);
+  useEffect(() => { loadMessages(); }, [dealId, contactId]);
 
   // Poll every 5s
   useEffect(() => {
     const iv = setInterval(loadMessages, 5000);
     return () => clearInterval(iv);
-  }, [dealId, dateFrom, dateTo, search]);
+  }, [dealId, contactId, dateFrom, dateTo, search]);
 
   // Reload when filters change
   useEffect(() => {
@@ -128,7 +133,7 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
         {loading && <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>Carregando...</div>}
         {!loading && msgs.length === 0 && (
           <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>
-            {hasFilters ? 'Nenhuma mensagem encontrada com esses filtros.' : 'Nenhuma mensagem neste negócio ainda.'}
+            {hasFilters ? 'Nenhuma mensagem encontrada com esses filtros.' : 'Nenhuma conversa com este contato ainda.'}
             {!hasFilters && <><br /><span style={{ fontSize: 11 }}>Envie a primeira mensagem abaixo.</span></>}
           </div>
         )}

@@ -1,6 +1,7 @@
 import { createServerClient } from '../supabase-server';
-import { listClientes, getCliente, listDocumentos, listNegociosAndamento, listRamos, listProdutores } from './client';
+import { listClientes, getCliente, listDocumentos, listNegociosAndamento, getNegocio, listRamos, listProdutores } from './client';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { CorpNegocio, CorpNegocioDetail } from './types';
 
 function formatPhone(ddd: number | null, numero: string | null): string | null {
   if (!numero) return null;
@@ -114,9 +115,30 @@ export async function syncDocumentos(datini: string, datfim: string): Promise<Sy
   const vendasFunnel = await sb.from('marpe_funnels').select('id').eq('name', 'Vendas').maybeSingle();
   if (!vendasFunnel.data?.id) { result.errors.push('Funnel Vendas not found'); return result; }
 
-  const emitidoStage = await sb.from('marpe_funnel_stages').select('id')
-    .eq('funnel_id', vendasFunnel.data.id).eq('name', 'Emitido').maybeSingle();
-  if (!emitidoStage.data?.id) { result.errors.push('Stage Emitido not found'); return result; }
+  // Emitted-policy stage: 'Emitido' by name, fallback to a won-terminal stage, fallback to last stage
+  const stagesRes = await sb.from('marpe_funnel_stages').select('id, name, sort_order, is_terminal, terminal_type')
+    .eq('funnel_id', vendasFunnel.data.id).order('sort_order');
+  const emitidoStage = stagesRes.data?.find(s => s.name === 'Emitido')
+    || stagesRes.data?.find(s => s.terminal_type === 'won')
+    || stagesRes.data?.[stagesRes.data.length - 1];
+  if (!emitidoStage?.id) { result.errors.push('No stage available for emitted policies'); return result; }
+
+  // Preload contact + deal maps (avoids 2 queries per document)
+  const contactMap = new Map<string, string>();
+  const dealMap = new Map<string, string>();
+  const PAGE_SIZE = 1000;
+  for (let page = 0; ; page++) {
+    const { data: rows } = await sb.from('marpe_contacts').select('id, corp_id')
+      .not('corp_id', 'is', null).range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    for (const r of (rows || [])) contactMap.set(r.corp_id, r.id);
+    if (!rows || rows.length < PAGE_SIZE) break;
+  }
+  for (let page = 0; ; page++) {
+    const { data: rows } = await sb.from('marpe_deals').select('id, corp_id')
+      .like('corp_id', 'doc_%').range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    for (const r of (rows || [])) dealMap.set(r.corp_id, r.id);
+    if (!rows || rows.length < PAGE_SIZE) break;
+  }
 
   let pag = 1;
   let total = 0;
@@ -126,31 +148,36 @@ export async function syncDocumentos(datini: string, datfim: string): Promise<Sy
 
     for (const doc of documentos) {
       const corpDealId = `doc_${doc.codfil}_${doc.nosnum}`;
-      const existing = await sb.from('marpe_deals').select('id').eq('corp_id', corpDealId).maybeSingle();
+      const contactId = contactMap.get(String(doc.cliente_codigo));
+      if (!contactId) { result.skipped++; continue; }
 
-      const contact = await sb.from('marpe_contacts').select('id').eq('corp_id', String(doc.cliente_codigo)).maybeSingle();
-      if (!contact.data?.id) { result.skipped++; continue; }
-
-      const dealData = {
-        contact_id: contact.data.id,
-        funnel_id: vendasFunnel.data.id,
-        stage_id: emitidoStage.data.id,
-        title: `${doc.ramo} — ${doc.cliente}`,
+      // Corp-owned data fields — safe to overwrite on every sync
+      const corpFields = {
         ramo: doc.ramo?.toLowerCase() || null,
         seguradora: doc.seguradora || null,
         apolice: doc.numapo || null,
         vigencia_inicio: parseCorpDate(doc.inivig),
         vigencia_fim: parseCorpDate(doc.fimvig),
-        deal_type: 'prospeccao',
-        corp_id: corpDealId,
       };
 
-      if (existing.data?.id) {
-        const { error } = await sb.from('marpe_deals').update(dealData).eq('id', existing.data.id);
+      const existingId = dealMap.get(corpDealId);
+      if (existingId) {
+        // UPDATE: never reset stage_id/funnel_id/title — kanban position is CRM-managed
+        const { error } = await sb.from('marpe_deals')
+          .update({ ...corpFields, contact_id: contactId })
+          .eq('id', existingId);
         if (error) result.errors.push(`Update doc ${doc.nosnum}: ${error.message}`);
         else result.updated++;
       } else {
-        const { error } = await sb.from('marpe_deals').insert(dealData);
+        const { error } = await sb.from('marpe_deals').insert({
+          ...corpFields,
+          contact_id: contactId,
+          funnel_id: vendasFunnel.data.id,
+          stage_id: emitidoStage.id,
+          title: `${doc.ramo} — ${doc.cliente}`,
+          deal_type: 'prospeccao',
+          corp_id: corpDealId,
+        });
         if (error) result.errors.push(`Insert doc ${doc.nosnum}: ${error.message}`);
         else result.created++;
       }
@@ -162,56 +189,138 @@ export async function syncDocumentos(datini: string, datfim: string): Promise<Sy
   return result;
 }
 
-export async function syncNegocios(): Promise<SyncResult> {
+// Maps Corp negocio (list item) fields → marpe_deals columns.
+// These are the Corp-owned data fields, safe to overwrite on every sync.
+function negocioListFields(neg: CorpNegocio): Record<string, any> {
+  return {
+    ramo: neg.ramo?.toLowerCase() || null,
+    premio: neg.val_premio || null,
+    comissao_valor: neg.val_c || null,
+    tipo_negocio: neg.tipo_neg || null,
+    deal_type: neg.tipo_neg?.toLowerCase()?.includes('renova') ? 'renovacao' : 'prospeccao',
+    next_action_date: parseCorpDate(neg.prox_aten_data),
+    next_action: neg.prox_aten_descricao || null,
+    vigencia_inicio: parseCorpDate(neg.inivig),
+    vigencia_fim: parseCorpDate(neg.fimvig),
+  };
+}
+
+// Maps Corp negocio DETAIL fields → marpe_deals columns (Fase 2 fields).
+function negocioDetailFields(det: CorpNegocioDetail): Record<string, any> {
+  return {
+    comissao_pct: det.per_c || null,
+    campanha: det.campanha || null,
+    seguradora: det.seguradora || null,
+    ja_possui_produto: det.produto_ja_possui === 'T',
+    seguradora_atual: det.produto_seguradora || null,
+    vigencia_atual_fim: parseCorpDate(det.produto_fimvig),
+    observacoes_proposta: det.observacoes || null,
+    pct_repasse: det.per_r || null,
+    valor_repasse: det.val_r || null,
+    detalhes_corp: {
+      status: det.status,
+      etapa: det.etapa,
+      prioridade: det.prioridade,
+      campo_base_repasse: det.campo_base_r,
+      criado_por: det.usuinc,
+      criado_em: det.datinc,
+      alterado_por: det.usualt,
+      alterado_em: det.datalt,
+      inicio_negociacao: det.dtini_negociacao,
+      codusu_responsavel: det.codusu_responsavel,
+      motivo_perda: det.motivo_perda,
+      atendimentos: det.atendimentos || [],
+    },
+  };
+}
+
+export async function syncNegocios(opts?: { withDetail?: boolean }): Promise<SyncResult> {
+  const withDetail = opts?.withDetail !== false; // default true
   const sb = createServerClient();
   const result: SyncResult = { type: 'negocios', created: 0, updated: 0, skipped: 0, errors: [] };
 
   const vendasFunnel = await sb.from('marpe_funnels').select('id').eq('name', 'Vendas').maybeSingle();
   if (!vendasFunnel.data?.id) { result.errors.push('Funnel Vendas not found'); return result; }
 
-  const stages = await sb.from('marpe_funnel_stages').select('id, name, sort_order')
+  // Entry stage: first non-terminal stage by sort_order (stage names are user-editable —
+  // never look up by hardcoded name; "Prospecção" was renamed and broke the sync silently)
+  const stages = await sb.from('marpe_funnel_stages').select('id, name, sort_order, is_terminal')
     .eq('funnel_id', vendasFunnel.data.id).order('sort_order');
-  const prospeccaoStage = stages.data?.find(s => s.name === 'Prospecção');
-  if (!prospeccaoStage) { result.errors.push('Stage Prospecção not found'); return result; }
+  const entryStage = stages.data?.find(s => !s.is_terminal) || stages.data?.[0];
+  if (!entryStage) { result.errors.push('No stages found in Vendas funnel'); return result; }
 
+  // Preload contact + deal maps (avoids 2 queries per negocio)
+  const contactMap = new Map<string, string>();
+  const dealMap = new Map<string, string>();
+  const PAGE_SIZE = 1000;
+  for (let page = 0; ; page++) {
+    const { data: rows } = await sb.from('marpe_contacts').select('id, corp_id')
+      .not('corp_id', 'is', null).range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    for (const r of (rows || [])) contactMap.set(r.corp_id, r.id);
+    if (!rows || rows.length < PAGE_SIZE) break;
+  }
+  for (let page = 0; ; page++) {
+    const { data: rows } = await sb.from('marpe_deals').select('id, corp_id')
+      .like('corp_id', 'neg_%').range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    for (const r of (rows || [])) dealMap.set(r.corp_id, r.id);
+    if (!rows || rows.length < PAGE_SIZE) break;
+  }
+
+  // Collect all negocios from Corp (paginated)
+  const allNegocios: CorpNegocio[] = [];
   let pag = 1;
   let total = 0;
   do {
     const { count, negocios } = await listNegociosAndamento({ pag, qtd_pag: 100 });
     total = count;
-
-    for (const neg of negocios) {
-      const corpNegId = `neg_${neg.codfil}_${neg.codigo}`;
-      const existing = await sb.from('marpe_deals').select('id').eq('corp_id', corpNegId).maybeSingle();
-
-      const contact = await sb.from('marpe_contacts').select('id').eq('corp_id', String(neg.codcli)).maybeSingle();
-      if (!contact.data?.id) { result.skipped++; continue; }
-
-      const dealData = {
-        contact_id: contact.data.id,
-        funnel_id: vendasFunnel.data.id,
-        stage_id: prospeccaoStage.id,
-        title: `${neg.ramo || 'Negócio'} — ${neg.cliente}`,
-        ramo: neg.ramo?.toLowerCase() || null,
-        premio: neg.val_premio || null,
-        comissao_valor: neg.val_c || null,
-        deal_type: neg.tipo_neg?.toLowerCase()?.includes('renova') ? 'renovacao' : 'prospeccao',
-        corp_id: corpNegId,
-      };
-
-      if (existing.data?.id) {
-        const { error } = await sb.from('marpe_deals').update(dealData).eq('id', existing.data.id);
-        if (error) result.errors.push(`Update neg ${neg.codigo}: ${error.message}`);
-        else result.updated++;
-      } else {
-        const { error } = await sb.from('marpe_deals').insert(dealData);
-        if (error) result.errors.push(`Insert neg ${neg.codigo}: ${error.message}`);
-        else result.created++;
-      }
-    }
-
+    allNegocios.push(...negocios);
     pag++;
-  } while ((pag - 1) * 100 < total);
+  } while ((pag - 1) * 100 < total && pag <= 50);
+
+  // Fetch details in small parallel batches (Corp rate-limit friendly)
+  const detailMap = new Map<number, CorpNegocioDetail>();
+  if (withDetail) {
+    const BATCH = 5;
+    for (let i = 0; i < allNegocios.length; i += BATCH) {
+      const batch = allNegocios.slice(i, i + BATCH);
+      const details = await Promise.all(batch.map(n => getNegocio(n.codigo).catch(() => null)));
+      details.forEach((d, idx) => { if (d) detailMap.set(batch[idx].codigo, d); });
+    }
+  }
+
+  for (const neg of allNegocios) {
+    const corpNegId = `neg_${neg.codfil}_${neg.codigo}`;
+    const contactId = contactMap.get(String(neg.codcli));
+    if (!contactId) { result.skipped++; continue; }
+
+    const detail = detailMap.get(neg.codigo);
+    const corpFields = {
+      ...negocioListFields(neg),
+      ...(detail ? negocioDetailFields(detail) : {}),
+    };
+
+    const existingId = dealMap.get(corpNegId);
+    if (existingId) {
+      // UPDATE: only Corp-owned data fields. NEVER reset stage_id/funnel_id/title —
+      // those are managed in the CRM kanban and must survive the sync.
+      const { error } = await sb.from('marpe_deals')
+        .update({ ...corpFields, contact_id: contactId })
+        .eq('id', existingId);
+      if (error) result.errors.push(`Update neg ${neg.codigo}: ${error.message}`);
+      else result.updated++;
+    } else {
+      const { error } = await sb.from('marpe_deals').insert({
+        ...corpFields,
+        contact_id: contactId,
+        funnel_id: vendasFunnel.data.id,
+        stage_id: entryStage.id,
+        title: `${neg.ramo || 'Negócio'} — ${neg.cliente}`,
+        corp_id: corpNegId,
+      });
+      if (error) result.errors.push(`Insert neg ${neg.codigo}: ${error.message}`);
+      else result.created++;
+    }
+  }
 
   return result;
 }
@@ -318,14 +427,16 @@ export async function syncContactByCorpId(corpId: number): Promise<{
 
   // ── 2. Funnels/stages ────────────────────────────────────────────────────────
   const { data: vendasFunnel } = await sb.from('marpe_funnels').select('id').eq('name', 'Vendas').maybeSingle();
-  const { data: emitidoStage } = await sb.from('marpe_funnel_stages').select('id')
-    .eq('funnel_id', vendasFunnel?.id || '').eq('name', 'Emitido').maybeSingle();
-  const { data: stagesAll } = await sb.from('marpe_funnel_stages').select('id, name, sort_order')
+  const { data: stagesAll } = await sb.from('marpe_funnel_stages').select('id, name, sort_order, is_terminal, terminal_type')
     .eq('funnel_id', vendasFunnel?.id || '').order('sort_order');
-  const prospeccaoStage = stagesAll?.find(s => s.name === 'Prospecção');
+  // Stage names are user-editable — never look up by hardcoded name
+  const entryStage = stagesAll?.find(s => !s.is_terminal) || stagesAll?.[0];
+  const emitidoStage = stagesAll?.find(s => s.name === 'Emitido')
+    || stagesAll?.find(s => s.terminal_type === 'won')
+    || stagesAll?.[stagesAll.length - 1];
 
   // ── 3. Negocios (active negotiations) — filter for this client ───────────────
-  if (vendasFunnel?.id && prospeccaoStage) {
+  if (vendasFunnel?.id && entryStage) {
     try {
       let pag = 1;
       let total = 0;
@@ -336,23 +447,29 @@ export async function syncContactByCorpId(corpId: number): Promise<{
         for (const neg of mine) {
           const corpNegId = `neg_${neg.codfil}_${neg.codigo}`;
           const { data: existingDeal } = await sb.from('marpe_deals').select('id').eq('corp_id', corpNegId).maybeSingle();
-          const dealData = {
-            contact_id: contactDbId,
-            funnel_id: vendasFunnel.id,
-            stage_id: prospeccaoStage.id,
-            title: `${neg.ramo || 'Negócio'} — ${neg.cliente}`,
-            ramo: neg.ramo?.toLowerCase() || null,
-            premio: neg.val_premio || null,
-            comissao_valor: neg.val_c || null,
-            deal_type: neg.tipo_neg?.toLowerCase()?.includes('renova') ? 'renovacao' : 'prospeccao',
-            corp_id: corpNegId,
+
+          const detail = await getNegocio(neg.codigo).catch(() => null);
+          const corpFields = {
+            ...negocioListFields(neg),
+            ...(detail ? negocioDetailFields(detail) : {}),
           };
+
           if (existingDeal?.id) {
-            const { error } = await sb.from('marpe_deals').update(dealData).eq('id', existingDeal.id);
+            // UPDATE: never reset stage_id/funnel_id/title — kanban position is CRM-managed
+            const { error } = await sb.from('marpe_deals')
+              .update({ ...corpFields, contact_id: contactDbId })
+              .eq('id', existingDeal.id);
             if (error) dealsResult.errors.push(`negocio ${neg.codigo}: ${error.message}`);
             else dealsResult.updated++;
           } else {
-            const { error } = await sb.from('marpe_deals').insert(dealData);
+            const { error } = await sb.from('marpe_deals').insert({
+              ...corpFields,
+              contact_id: contactDbId,
+              funnel_id: vendasFunnel.id,
+              stage_id: entryStage.id,
+              title: `${neg.ramo || 'Negócio'} — ${neg.cliente}`,
+              corp_id: corpNegId,
+            });
             if (error) dealsResult.errors.push(`negocio ${neg.codigo}: ${error.message}`);
             else dealsResult.created++;
           }
@@ -378,25 +495,30 @@ export async function syncContactByCorpId(corpId: number): Promise<{
         for (const doc of mine) {
           const corpDocId = `doc_${doc.codfil}_${doc.nosnum}`;
           const { data: existingDeal } = await sb.from('marpe_deals').select('id').eq('corp_id', corpDocId).maybeSingle();
-          const dealData = {
-            contact_id: contactDbId,
-            funnel_id: vendasFunnel.id,
-            stage_id: emitidoStage.id,
-            title: `${doc.ramo} — ${doc.cliente}`,
+          const corpFields = {
             ramo: doc.ramo?.toLowerCase() || null,
             seguradora: doc.seguradora || null,
             apolice: doc.numapo || null,
             vigencia_inicio: parseCorpDate(doc.inivig),
             vigencia_fim: parseCorpDate(doc.fimvig),
-            deal_type: 'prospeccao',
-            corp_id: corpDocId,
           };
           if (existingDeal?.id) {
-            const { error } = await sb.from('marpe_deals').update(dealData).eq('id', existingDeal.id);
+            // UPDATE: never reset stage_id/funnel_id/title — kanban position is CRM-managed
+            const { error } = await sb.from('marpe_deals')
+              .update({ ...corpFields, contact_id: contactDbId })
+              .eq('id', existingDeal.id);
             if (error) dealsResult.errors.push(`doc ${doc.nosnum}: ${error.message}`);
             else dealsResult.updated++;
           } else {
-            const { error } = await sb.from('marpe_deals').insert(dealData);
+            const { error } = await sb.from('marpe_deals').insert({
+              ...corpFields,
+              contact_id: contactDbId,
+              funnel_id: vendasFunnel.id,
+              stage_id: emitidoStage.id,
+              title: `${doc.ramo} — ${doc.cliente}`,
+              deal_type: 'prospeccao',
+              corp_id: corpDocId,
+            });
             if (error) dealsResult.errors.push(`doc ${doc.nosnum}: ${error.message}`);
             else dealsResult.created++;
           }
