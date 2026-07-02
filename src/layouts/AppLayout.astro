@@ -80,6 +80,25 @@ const navItems = [
     </div>
 
     <div class="sidebar-bottom">
+      <!-- Theme toggle — Apple-style pill -->
+      <button id="theme-toggle" class="theme-toggle" title="Alternar tema" aria-label="Alternar entre modo escuro e claro">
+        <span class="theme-toggle__track">
+          <span class="theme-toggle__thumb">
+            <!-- Moon (dark) -->
+            <svg class="theme-icon theme-icon--moon" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+            <!-- Sun (light) -->
+            <svg class="theme-icon theme-icon--sun" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+              <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+          </span>
+        </span>
+      </button>
+
       {isAdmin && (
         <a href="/config" class:list={['sidebar-item', { active: activeSection === 'config' }]} title="Configurações">
           <svg class="sidebar-icon" viewBox="0 0 24 24">
@@ -113,87 +132,108 @@ const navItems = [
 <style>
   .sidebar {
     width: var(--sidebar-width);
-    background: #08080f;
+    background: var(--sidebar-bg);
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 12px 0;
+    padding: 14px 0;
     flex-shrink: 0;
   }
   .sidebar-logo {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, var(--accent), #2563EB);
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    background: linear-gradient(145deg, #4F9BFF, #1D5EDB);
+    box-shadow: 0 4px 14px rgba(59,130,246,0.35), 0 0 0 1px rgba(255,255,255,0.10) inset;
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 14px;
     color: #fff;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     text-decoration: none;
+    letter-spacing: -0.02em;
+    transition: transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out);
+  }
+  .sidebar-logo:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(59,130,246,0.45), 0 0 0 1px rgba(255,255,255,0.12) inset;
   }
   .sidebar-nav {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
     flex: 1;
   }
   .sidebar-item {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--text-muted);
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background 0.18s var(--ease), color 0.18s var(--ease), box-shadow 0.18s var(--ease);
     position: relative;
     text-decoration: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-family: inherit;
   }
   .sidebar-item:hover {
-    background: #14141e;
+    background: rgba(255,255,255,0.07);
     color: var(--text-secondary);
   }
   .sidebar-item.active {
     background: var(--accent-dim);
     color: var(--accent-light);
+    box-shadow: 0 0 0 1px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.07);
   }
   .sidebar-icon {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     stroke: currentColor;
     fill: none;
-    stroke-width: 1.8;
+    stroke-width: 1.75;
     stroke-linecap: round;
     stroke-linejoin: round;
+    transition: transform 0.18s var(--ease-spring);
+  }
+  .sidebar-item:hover .sidebar-icon {
+    transform: scale(1.08);
   }
   .sidebar-indicator {
     position: absolute;
-    left: -10px;
+    left: -12px;
     top: 50%;
     transform: translateY(-50%);
     width: 3px;
-    height: 16px;
-    border-radius: 0 2px 2px 0;
-    background: var(--accent);
+    height: 20px;
+    border-radius: 0 3px 3px 0;
+    background: linear-gradient(180deg, var(--accent-light), var(--accent));
+    box-shadow: 0 0 8px var(--accent-glow);
   }
   .sidebar-bottom {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-subtle);
+    width: 100%;
   }
   .sidebar-avatar {
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
-    background: #1e1e30;
+    background: linear-gradient(135deg, #1e2a48, #1a1a2e);
+    border: 1.5px solid var(--border-accent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -201,35 +241,102 @@ const navItems = [
     font-weight: 600;
     color: var(--accent-light);
     cursor: pointer;
+    transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease);
   }
+  .sidebar-avatar:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+  }
+
+  /* ── Apple-style theme toggle ─────────────────────────────── */
+  .theme-toggle {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .theme-toggle__track {
+    width: 34px;
+    height: 20px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.08);
+    display: flex;
+    align-items: center;
+    padding: 3px;
+    transition: background 0.25s var(--ease);
+    border: 1px solid rgba(255,255,255,0.10);
+  }
+  .theme-toggle__thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: translateX(0);
+    transition: transform 0.25s var(--ease-spring), background 0.25s var(--ease);
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+  .theme-icon { display: none; }
+  .theme-icon--moon { display: block; color: #c4c4d8; }
+  .theme-icon--sun  { display: none;  color: #fbbf24; }
+
+  /* Light mode state */
+  html.light .theme-toggle__track {
+    background: #dbeafe;
+    border-color: rgba(0,0,0,0.10);
+  }
+  html.light .theme-toggle__thumb {
+    background: var(--accent);
+    transform: translateX(14px);
+    box-shadow: 0 1px 4px rgba(37,99,235,0.5);
+  }
+  html.light .theme-icon--moon { display: none;  }
+  html.light .theme-icon--sun  { display: block; }
 
   /* ── Notification badges ─────────────────────────────────────── */
   .nav-badge {
     display: none; /* hidden until JS sets a count */
     position: absolute;
-    top: 4px;
-    right: 4px;
-    min-width: 18px;
-    height: 18px;
+    top: 3px;
+    right: 3px;
+    min-width: 17px;
+    height: 17px;
     border-radius: 9px;
     padding: 0 4px;
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 18px;
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 17px;
     text-align: center;
     color: #fff;
     pointer-events: none;
-    /* smooth pop-in */
-    animation: badge-pop 0.2s cubic-bezier(0.23, 1, 0.32, 1) both;
+    animation: badge-pop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    border: 1.5px solid var(--sidebar-bg);
   }
-  .nav-badge--red   { background: var(--red); }
-  .nav-badge--amber { background: var(--amber); color: #000; }
+  .nav-badge--red   { background: var(--red); box-shadow: 0 2px 6px rgba(239,68,68,0.4); }
+  .nav-badge--amber { background: var(--amber); color: #000; box-shadow: 0 2px 6px rgba(245,158,11,0.35); }
   .nav-badge.visible { display: block; }
 
   @keyframes badge-pop {
     from { transform: scale(0.5); opacity: 0; }
     to   { transform: scale(1);   opacity: 1; }
   }
+
+  /* ── Light mode sidebar override ─── */
+  html.light .sidebar {
+    background: #1e293b;
+    border-right-color: #334155;
+  }
+  html.light .sidebar-item { color: #94a3b8; }
+  html.light .sidebar-item:hover { background: rgba(255,255,255,0.10); color: #e2e8f0; }
+  html.light .sidebar-item.active { background: rgba(59,130,246,0.22); color: #93c5fd; }
+  html.light .sidebar-bottom { border-top-color: rgba(255,255,255,0.08); }
+  html.light .theme-toggle__track { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.12); }
 
   /* ── Mobile responsive ────────────────────────────────────────── */
   .sidebar-toggle {
@@ -241,13 +348,14 @@ const navItems = [
     width: 38px;
     height: 38px;
     border-radius: 10px;
-    background: #08080f;
+    background: var(--bg-secondary);
     border: 1px solid var(--border);
     color: var(--text-secondary);
     align-items: center;
     justify-content: center;
     cursor: pointer;
     padding: 0;
+    box-shadow: var(--shadow-sm);
   }
   .sidebar-overlay {
     display: none;
@@ -286,6 +394,14 @@ const navItems = [
     }
   }
 </style>
+
+<script>
+  // ── Theme toggle (apply before paint to avoid flash) ──────────────────────
+  (function() {
+    const saved = localStorage.getItem('marpe-theme');
+    if (saved === 'light') document.documentElement.classList.add('light');
+  })();
+</script>
 
 <script>
   const toggle = document.getElementById('sidebar-toggle');
@@ -359,4 +475,13 @@ const navItems = [
   // Initial fetch + poll every 30 s
   fetchUnread();
   setInterval(fetchUnread, 30_000);
+</script>
+
+<script>
+  // ── Theme toggle button ───────────────────────────────────────────────────
+  const themeBtn = document.getElementById('theme-toggle');
+  themeBtn?.addEventListener('click', () => {
+    const isLight = document.documentElement.classList.toggle('light');
+    localStorage.setItem('marpe-theme', isLight ? 'light' : 'dark');
+  });
 </script>

@@ -70,6 +70,7 @@ export default function CampaignsView() {
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [hoveredCampaign, setHoveredCampaign] = useState<string | null>(null);
 
   function load() {
     Promise.all([
@@ -351,7 +352,10 @@ export default function CampaignsView() {
           const sc = STATUS_COLORS[c.status] || STATUS_COLORS.draft;
           const sf = c.segment_filter || {};
           return (
-            <div key={c.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div key={c.id}
+              onMouseEnter={() => setHoveredCampaign(c.id)}
+              onMouseLeave={() => setHoveredCampaign(null)}
+              style={{ background: hoveredCampaign === c.id ? 'var(--bg-card-hover)' : 'var(--bg-card)', border: `1px solid ${hoveredCampaign === c.id ? 'var(--border-accent)' : 'var(--border)'}`, borderRadius: 12, padding: '16px 18px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 14, boxShadow: hoveredCampaign === c.id ? 'var(--shadow-sm)' : 'none', transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>

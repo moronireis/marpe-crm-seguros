@@ -302,33 +302,53 @@ export default function DashboardView() {
       {/* KPIs — 4 cols desktop, 2 cols tablet, 1 col mobile */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 10 : 14, marginTop: 20 }}>
         {kpis.map(s => (
-          <div key={s.label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: isMobile ? 14 : 20 }}>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{s.label}</div>
-            <div style={{ fontSize: isMobile ? 22 : 28, fontWeight: 700, color: s.color, marginTop: 8, letterSpacing: '-0.02em' }}>{s.value}</div>
+          <div
+            key={s.label}
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border)',
+              borderRadius: 14,
+              padding: isMobile ? '14px 16px' : '20px 22px',
+              borderTop: `3px solid ${s.color}`,
+              boxShadow: 'var(--shadow-sm)',
+              transition: 'box-shadow 0.18s var(--ease), transform 0.18s var(--ease)',
+              cursor: 'default',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLDivElement).style.boxShadow = 'var(--shadow-md)';
+              (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLDivElement).style.boxShadow = 'var(--shadow-sm)';
+              (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
+            }}
+          >
+            <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>{s.label}</div>
+            <div style={{ fontSize: isMobile ? 24 : 30, fontWeight: 700, color: s.color, marginTop: 10, letterSpacing: '-0.03em', lineHeight: 1 }}>{s.value}</div>
           </div>
         ))}
       </div>
 
       {/* Row 2: Ramo breakdown + Deal types */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: isMobile ? 10 : 14, marginTop: isMobile ? 10 : 14 }}>
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-          <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 16 }}>Negócios por ramo</h4>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', boxShadow: 'var(--shadow-xs)' }}>
+          <h4 style={{ fontSize: 12, fontWeight: 600, marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Negócios por ramo</h4>
           {ramoEntries.map(([ramo, count]) => (
-            <div key={ramo} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <span style={{ fontSize: 11, color: 'var(--text-secondary)', width: 100, flexShrink: 0, textTransform: 'uppercase' }}>{ramo}</span>
-              <div style={{ flex: 1, height: 20, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${(count / maxRamo) * 100}%`, background: RAMO_COLORS[ramo.toLowerCase()] || 'var(--accent)', borderRadius: 4 }} />
+            <div key={ramo} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-secondary)', width: 96, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 500 }}>{ramo}</span>
+              <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${(count / maxRamo) * 100}%`, background: RAMO_COLORS[ramo.toLowerCase()] || 'var(--accent)', borderRadius: 99, transition: 'width 0.5s var(--ease-out)' }} />
               </div>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 40, textAlign: 'right' }}>{count}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, width: 36, textAlign: 'right' }}>{count}</span>
             </div>
           ))}
         </div>
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-          <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 16 }}>Tipo de negócio</h4>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', boxShadow: 'var(--shadow-xs)' }}>
+          <h4 style={{ fontSize: 12, fontWeight: 600, marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Tipo de negócio</h4>
           {Object.entries(stats.dealTypeBreakdown).sort((a, b) => b[1] - a[1]).map(([type, count]) => (
-            <div key={type} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(26,26,42,0.3)' }}>
-              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{DEAL_TYPE_LABELS[type] || type}</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{count}</span>
+            <div key={type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>{DEAL_TYPE_LABELS[type] || type}</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>{count}</span>
             </div>
           ))}
         </div>

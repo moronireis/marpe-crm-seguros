@@ -49,7 +49,10 @@ export async function sendWhatsAppText(
     return { ok: false, error: 'WhatsApp not configured' };
   }
 
-  const normalizedPhone = normalizePhone(phone);
+  // Group JIDs (ending in @g.us) must be passed as-is to UazapiGO — do NOT normalize them.
+  // Individual numbers go through normalizePhone to ensure correct country-code format.
+  const isGroupJid = phone.endsWith('@g.us');
+  const normalizedPhone = isGroupJid ? phone : normalizePhone(phone);
 
   try {
     const res = await fetch(`${UAZAPI_URL}/send/text?token=${UAZAPI_TOKEN}`, {

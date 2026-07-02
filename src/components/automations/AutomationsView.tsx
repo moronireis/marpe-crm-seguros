@@ -87,7 +87,7 @@ export default function AutomationsView() {
     wrap: { display: 'flex', flexDirection: 'column', height: '100%' },
     header: { height: 56, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 24px', gap: 16, flexShrink: 0 },
     body: { flex: 1, overflowY: 'auto', padding: 24 },
-    card: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 14 },
+    card: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 14, boxShadow: 'var(--shadow-xs)', transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s' },
     badge: (active: boolean) => ({ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 100, background: active ? 'rgba(34,197,94,0.1)' : 'rgba(107,114,128,0.1)', color: active ? 'var(--green)' : 'var(--text-muted)' }),
     pill: { fontSize: 10, padding: '2px 8px', borderRadius: 100, background: 'rgba(59,130,246,0.1)', color: 'var(--accent-light)', fontWeight: 500 },
     input: { width: '100%', padding: '9px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', marginBottom: 10 },

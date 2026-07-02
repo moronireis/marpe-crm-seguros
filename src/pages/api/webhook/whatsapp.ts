@@ -1,8 +1,52 @@
 import type { APIRoute } from 'astro';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHmac, createDecipheriv } from 'crypto';
 import { createServerClient } from '../../../lib/supabase-server';
 import { sendWhatsAppText } from '../../../lib/whatsapp/send';
 import { interpolateVariables } from '../../../lib/variables';
+
+// ── WhatsApp media decryption ─────────────────────────────────────────────────
+// WhatsApp encrypts ALL media with AES-256-CBC before uploading to CDN.
+// The decryption key is derived via HKDF-SHA256 from the message's mediaKey field.
+// Reference: https://faq.whatsapp.com/general/security-and-privacy/end-to-end-encryption
+
+const WA_MEDIA_INFO: Record<string, string> = {
+  image:    'WhatsApp Image Keys',
+  sticker:  'WhatsApp Image Keys',
+  audio:    'WhatsApp Audio Keys',
+  ptt:      'WhatsApp Audio Keys',
+  video:    'WhatsApp Video Keys',
+  document: 'WhatsApp Document Keys',
+};
+
+function hkdfSha256(inputKey: Buffer, salt: Buffer, info: Buffer, length: number): Buffer {
+  // Extract
+  const prk = createHmac('sha256', salt).update(inputKey).digest();
+  // Expand
+  const blocks = Math.ceil(length / 32);
+  let prev = Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  for (let i = 1; i <= blocks; i++) {
+    prev = createHmac('sha256', prk).update(prev).update(info).update(Buffer.from([i])).digest();
+    chunks.push(prev);
+  }
+  return Buffer.concat(chunks).slice(0, length);
+}
+
+function decryptWhatsAppMedia(encryptedBytes: Buffer, mediaKeyB64: string, mediaTypeLower: string): Buffer {
+  const mediaKey = Buffer.from(mediaKeyB64, 'base64');
+  const salt    = Buffer.alloc(32, 0);
+  const info    = Buffer.from(WA_MEDIA_INFO[mediaTypeLower] || 'WhatsApp Image Keys');
+  const derived = hkdfSha256(mediaKey, salt, info, 112);
+  const iv         = derived.slice(0, 16);
+  const cipherKey  = derived.slice(16, 48);
+  // Encrypted file format: ciphertext || HMAC-SHA256(10 bytes at end)
+  // We strip the last 10 bytes (MAC) before decrypting.
+  const ciphertext = encryptedBytes.slice(0, -10);
+  const decipher   = createDecipheriv('aes-256-cbc', cipherKey, iv);
+  decipher.setAutoPadding(true);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
 
 export const prerender = false;
 
@@ -23,49 +67,141 @@ export const POST: APIRoute = async ({ request }) => {
   const chat = body.chat || {};
 
   // Extract fields from actual UazapiGO format
-  const chatid = msg.chatid || chat.wa_chatid || '';
+  const chatid = msg.chatid || chat.wa_chatid || body.chatid || '';
   const phone = chatid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-  const fromMe = msg.fromMe || false;
-  const messageId = msg.messageid || msg.id || '';
-  const messageType = msg.type || msg.messageType || 'text';
-  const timestamp = msg.messageTimestamp || Date.now();
-  const senderName = chat.name || msg.senderName || phone;
-  const isGroup = msg.isGroup || chatid.endsWith('@g.us') || false;
+  const fromMe = msg.fromMe ?? body.fromMe ?? false;
+  const messageId = msg.messageid || msg.id || msg.key?.id || body.messageid || '';
+  const timestamp = msg.messageTimestamp || body.messageTimestamp || Date.now();
 
-  // Detect content type — ptt (push-to-talk) is audio in UazapiGO
+  // UazapiGO sends message type in multiple possible places:
+  // 1. msg.type = "image" | "imageMessage" | "audio" | "audioMessage" etc. (simplified format)
+  // 2. msg.messageType = same
+  // 3. body.type = top-level type field
+  // 4. Keys of msg.message = raw Baileys format where {imageMessage:{...}} means image
+  const baileysType = msg.message ? Object.keys(msg.message).find(k => k !== 'contextInfo') : null;
+  const messageType: string =
+    msg.type || msg.messageType || body.type || body.messageType ||
+    baileysType || 'text';
+
+  // If raw Baileys format, drill into the message content object for fields
+  const baileysContent: any = baileysType ? (msg.message?.[baileysType] || {}) : {};
+
+  // pushName / notify = the contact's WhatsApp display name (what the contact set for themselves)
+  const pushName: string = msg.pushName || msg.notify || body.pushName || body.notify || '';
+  const senderName = chat.name || pushName || msg.senderName || phone;
+
+  // Profile picture URL — UazapiGO may send in chat or message level
+  const profilePicUrl: string | null =
+    chat.profilePicUrl || chat.pictureUrl || chat.photo ||
+    chat.image || chat.imagePreview || chat.profilePic ||
+    msg.profilePicUrl || msg.pictureUrl || msg.profilePic ||
+    body.profilePicUrl || body.pictureUrl || null;
+  const isGroup = msg.isGroup || body.isGroup || chatid.endsWith('@g.us') || false;
+
+  // For group messages: the individual participant who sent the message
+  const groupParticipantJid: string =
+    msg.participant || msg.sender || msg.key?.participant ||
+    body.participant || body.sender || '';
+  const groupParticipantPhone = groupParticipantJid
+    .replace('@s.whatsapp.net', '')
+    .replace('@g.us', '')
+    .replace('@lid', '');
+  const groupParticipantNameRaw: string =
+    msg.pushName || msg.notify || msg.senderName ||
+    body.pushName || body.senderName ||
+    chat.pushName || chat.senderName || '';
+
+  // UazapiGO sends type="media" with the actual content inside msg.content object.
+  // Real subtype is in msg.mediaType ("image","audio","video","document","sticker").
+  // The CDN URL is in msg.content.URL (capital URL).
+  // MIME is in msg.content.mimetype.
+  const msgContent: any = msg.content || {};
+
+  const rawMime: string | null =
+    msgContent.mimetype || msgContent.mimeType ||
+    msg.mimetype || msg.media?.mimetype || msg.mimeType ||
+    baileysContent.mimetype || baileysContent.mimeType || null;
+
+  // Real subtype from mediaType field (most reliable for UazapiGO "media" type)
+  const mediaSubtype: string = (msg.mediaType || '').toLowerCase();
+
+  function detectContentType(t: string, m: string): 'text' | 'image' | 'audio' | 'video' | 'document' | 'sticker' {
+    if (t.includes('image') || m.startsWith('image/')) return 'image';
+    if (t.includes('audio') || t.includes('ptt') || m.startsWith('audio/')) return 'audio';
+    if (t.includes('video') || m.startsWith('video/')) return 'video';
+    if (t.includes('document') || m.includes('pdf') || m.includes('msword') || m.includes('spreadsheet') || m.includes('presentation')) return 'document';
+    if (t.includes('sticker')) return 'sticker';
+    return 'text';
+  }
+
+  const msgTypeLower = messageType.toLowerCase();
+  const mimeLower = (rawMime || '').toLowerCase();
+
+  const isGenericMedia = msgTypeLower === 'media';
+
+  // Detect: try mediaSubtype first, then messageType, then MIME
   const contentType: 'text' | 'image' | 'audio' | 'video' | 'document' | 'sticker' =
-    messageType.toLowerCase().includes('image') ? 'image'
-    : messageType.toLowerCase().includes('audio') || messageType.toLowerCase().includes('ptt') ? 'audio'
-    : messageType.toLowerCase().includes('video') ? 'video'
-    : messageType.toLowerCase().includes('document') ? 'document'
-    : messageType.toLowerCase().includes('sticker') ? 'sticker'
-    : 'text';
+    mediaSubtype ? detectContentType(mediaSubtype, mimeLower)
+    : detectContentType(msgTypeLower, mimeLower);
 
   const isMedia = contentType !== 'text' && contentType !== 'sticker';
 
-  // Extract media URL — UazapiGO sends it in several possible fields
-  const mediaUrl: string | null = isMedia
-    ? (msg.mediaUrl || msg.media?.url || msg.fileUrl || msg.url || null)
-    : null;
+  // Extract media URL — UazapiGO puts it in msg.content.URL (capital) for "media" type
+  // Also check legacy fields for other message types
+  const rawMediaUrl: string | null =
+    msgContent.URL || msgContent.url ||
+    msg.mediaUrl || msg.media?.url || msg.fileUrl || msg.url ||
+    baileysContent.url || baileysContent.mediaUrl || null;
 
-  // Extract MIME type for rendering hints
-  const mediaMime: string | null = isMedia
-    ? (msg.mimetype || msg.media?.mimetype || msg.mimeType || null)
-    : null;
+  // Extract base64 if present
+  const base64Data: string | null =
+    msg.base64 || msg.data || msg.media?.base64 || msg.media?.data ||
+    baileysContent.base64 || null;
 
-  // Text body: for media messages, prefer caption; fall back to empty string (no caption is normal)
-  const messageBody: string = msg.caption || msg.text || msg.content?.text || '';
+  // Text body: caption for media, text for regular messages
+  const messageBody: string =
+    msg.caption || msg.text || msgContent.caption ||
+    baileysContent.caption || body.caption || body.text || '';
 
-  // Skip if no phone. Skip non-media messages with no body.
-  // Media messages with no caption are valid — we keep them.
+  // Skip if no chatid/phone
   if (!phone) {
     return new Response('OK', { status: 200 });
   }
-  if (!isMedia && !messageBody) {
+  // Skip text messages with no body (always keep media even without caption)
+  if (!isMedia && !isGenericMedia && !messageBody) {
+    return new Response('OK', { status: 200 });
+  }
+
+  // Filter group system messages (joins, leaves, title changes, etc.)
+  // UazapiGO sends these as messageType "notification", "groupNotification", or similar
+  const isSystemMsg = ['notification', 'groupNotification', 'e2e_notification',
+    'group_change_icon', 'group_change_description', 'group_participant_add',
+    'group_participant_remove', 'group_change_subject'].includes(messageType);
+  if (isGroup && isSystemMsg) {
     return new Response('OK', { status: 200 });
   }
 
   const sb = createServerClient();
+
+  // Resolve group participant name + photo — look up in contacts by phone
+  let groupParticipantName: string = groupParticipantNameRaw;
+  let groupParticipantPhoto: string | null = null;
+  if (isGroup && groupParticipantPhone) {
+    const { data: participantContact } = await sb
+      .from('marpe_contacts')
+      .select('name, photo_url')
+      .ilike('phone', `%${groupParticipantPhone.slice(-8)}%`)
+      .maybeSingle();
+    if (participantContact) {
+      const looked = participantContact.name || '';
+      if (!groupParticipantName && looked && !/^[\d\s()+\-@]+$/.test(looked)) {
+        groupParticipantName = looked;
+      }
+      if (participantContact.photo_url) {
+        groupParticipantPhoto = participantContact.photo_url;
+      }
+    }
+  }
 
   // Find or create contact
   let contactId: string | null = null;
@@ -85,9 +221,12 @@ export const POST: APIRoute = async ({ request }) => {
 
     if (existingGroup?.id) {
       contactId = existingGroup.id;
-      // Update group name if we got a better one (not a JID)
-      if (groupName && !groupName.includes('@g.us')) {
-        await sb.from('marpe_contacts').update({ name: groupName }).eq('id', existingGroup.id);
+      // Update group name and photo if we have better data
+      const updates: Record<string, any> = {};
+      if (groupName && !groupName.includes('@g.us')) updates.name = groupName;
+      if (profilePicUrl) updates.photo_url = profilePicUrl;
+      if (Object.keys(updates).length > 0) {
+        await sb.from('marpe_contacts').update(updates).eq('id', existingGroup.id);
       }
     } else {
       // Create group contact
@@ -97,6 +236,7 @@ export const POST: APIRoute = async ({ request }) => {
           name: groupName,
           phone: groupJid,
           source: 'whatsapp_group',
+          ...(profilePicUrl ? { photo_url: profilePicUrl } : {}),
         })
         .select('id')
         .single();
@@ -112,6 +252,29 @@ export const POST: APIRoute = async ({ request }) => {
 
     if (existing?.id) {
       contactId = existing.id;
+      const updates: Record<string, any> = {};
+
+      // Update name if we have a better one (not a raw phone / JID)
+      const betterName = pushName || chat.name || '';
+      const nameIsPhoneOrEmpty = !betterName || /^[\d\s()+\-]+$/.test(betterName) || betterName.includes('@');
+      if (!nameIsPhoneOrEmpty) {
+        const { data: currentContact } = await sb
+          .from('marpe_contacts')
+          .select('name')
+          .eq('id', existing.id)
+          .single();
+        const currentName = currentContact?.name || '';
+        const currentNameIsWeak = !currentName || /^[\d\s()+\-]+$/.test(currentName) || currentName.includes('@');
+        if (currentNameIsWeak) updates.name = betterName;
+      }
+
+      // Always update photo_url when we receive one (WhatsApp pics change over time)
+      if (profilePicUrl) updates.photo_url = profilePicUrl;
+
+      if (Object.keys(updates).length > 0) {
+        updates.updated_at = new Date().toISOString();
+        await sb.from('marpe_contacts').update(updates).eq('id', existing.id);
+      }
     } else {
       // Try last 8 digits match
       const { data: partial } = await sb
@@ -122,6 +285,9 @@ export const POST: APIRoute = async ({ request }) => {
 
       if (partial?.id) {
         contactId = partial.id;
+        if (profilePicUrl) {
+          await sb.from('marpe_contacts').update({ photo_url: profilePicUrl, updated_at: new Date().toISOString() }).eq('id', partial.id);
+        }
       } else {
         // Create new contact from WhatsApp
         const { data: created } = await sb
@@ -130,6 +296,7 @@ export const POST: APIRoute = async ({ request }) => {
             name: senderName || phone,
             phone,
             source: 'whatsapp',
+            ...(profilePicUrl ? { photo_url: profilePicUrl } : {}),
           })
           .select('id')
           .single();
@@ -196,10 +363,182 @@ export const POST: APIRoute = async ({ request }) => {
     }
   }
 
-  // For group messages, prefix the body with the sender name
+  // For group messages, prefix the body with the individual participant who sent it.
+  // Only use a label if we have a real name (pushName/notify). If UazapiGO doesn't
+  // send pushName for this event, omit the prefix rather than showing a numeric JID.
+  const groupSenderLabel = groupParticipantName || null;
   const finalBody = isGroup
-    ? `[${senderName}]: ${messageBody}`
+    ? (groupSenderLabel ? `[${groupSenderLabel}]: ${messageBody}` : messageBody)
     : messageBody;
+
+  // ── Media storage ────────────────────────────────────────────────────────────
+  const UAZAPI_URL = import.meta.env.UAZAPI_URL || 'https://u4digital.uazapi.com';
+  const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN || '';
+
+  function extFromMime(m: string | null, ct: string): string {
+    const t = (m || ct).toLowerCase();
+    if (t.includes('jpeg') || t.includes('jpg')) return 'jpg';
+    if (t.includes('png')) return 'png';
+    if (t.includes('webp')) return 'webp';
+    if (t.includes('gif')) return 'gif';
+    if (t.includes('ogg') || t.includes('ptt')) return 'ogg';
+    if (t.includes('mpeg') || t.includes('mp3')) return 'mp3';
+    if (t.includes('m4a') || t.includes('mp4a')) return 'm4a';
+    if (t.includes('video') || t.includes('mp4')) return 'mp4';
+    if (t.includes('pdf')) return 'pdf';
+    if (t.includes('docx') || t.includes('word')) return 'docx';
+    if (t.includes('xlsx') || t.includes('excel')) return 'xlsx';
+    if (ct === 'audio') return 'ogg';
+    if (ct === 'video') return 'mp4';
+    if (ct === 'image') return 'jpg';
+    return 'bin';
+  }
+
+  let finalMediaUrl: string | null = null; // Will be set to Supabase Storage URL after upload
+  let finalMime: string | null = rawMime;
+  let finalContentType = contentType;
+
+  // ── Step 1: If UazapiGO sent base64 inline, we'll upload it in Step 4
+  let resolvedBase64: string | null = base64Data;
+  let resolvedMimeFromDownload: string | null = null;
+
+  // ── Step 2: Download from WhatsApp CDN, decrypt (AES-256-CBC), upload to Storage
+  // WhatsApp encrypts ALL media before CDN upload. mediaKey is in msg.content.mediaKey.
+  // CDN URLs expire — must be downloaded immediately in the webhook handler.
+  const mediaKeyB64: string | null = msgContent.mediaKey || null;
+
+  let mediaDebug: Record<string, any> = {};
+
+  if ((isMedia || isGenericMedia) && rawMediaUrl && !resolvedBase64 && messageId && contactId) {
+    mediaDebug.step2_started = true;
+    mediaDebug.has_media_key = !!mediaKeyB64;
+    mediaDebug.media_subtype = mediaSubtype;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 18000);
+      let cdnRes: Response;
+      try {
+        cdnRes = await fetch(rawMediaUrl, { signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+      mediaDebug.cdn_status = cdnRes.status;
+      if (cdnRes.ok) {
+        const mimeFromResp = cdnRes.headers.get('content-type') || rawMime || 'application/octet-stream';
+        const mimeToUse = finalMime || rawMime || mimeFromResp;
+        finalMime = mimeToUse;
+
+        if (isGenericMedia) {
+          finalContentType = detectContentType(mediaSubtype, (rawMime || mimeFromResp).toLowerCase());
+        }
+
+        let mediaBytes = Buffer.from(await cdnRes.arrayBuffer());
+        mediaDebug.cdn_bytes = mediaBytes.length;
+
+        // Decrypt if we have the mediaKey (WhatsApp AES-256-CBC encryption)
+        if (mediaKeyB64 && mediaBytes.length > 10) {
+          try {
+            const typeForDecrypt = mediaSubtype || finalContentType;
+            mediaBytes = decryptWhatsAppMedia(mediaBytes, mediaKeyB64, typeForDecrypt);
+            mediaDebug.decrypted = true;
+            mediaDebug.decrypted_bytes = mediaBytes.length;
+            mediaDebug.first_bytes = mediaBytes.slice(0, 4).toString('hex');
+          } catch (decryptErr: any) {
+            mediaDebug.decrypt_error = String(decryptErr?.message || decryptErr);
+          }
+        }
+
+        const ext = extFromMime(mimeToUse, finalContentType);
+        const filePath = `${contactId}/${messageId}.${ext}`;
+        // Strip codec/parameter suffix from MIME before upload (Supabase allowlist uses base types)
+        // e.g. "audio/ogg; codecs=opus" → "audio/ogg"
+        const uploadMime = mimeToUse.split(';')[0].trim();
+
+        await sb.storage.createBucket('marpe-media', { public: true, fileSizeLimit: 52428800 }).catch(() => {});
+        const { error: uploadErr } = await sb.storage
+          .from('marpe-media')
+          .upload(filePath, mediaBytes, { contentType: uploadMime, upsert: true });
+
+        if (!uploadErr) {
+          const { data: urlData } = sb.storage.from('marpe-media').getPublicUrl(filePath);
+          finalMediaUrl = urlData.publicUrl;
+          mediaDebug.upload_ok = true;
+        } else {
+          mediaDebug.upload_error = uploadErr.message;
+          finalMediaUrl = rawMediaUrl;
+        }
+      } else {
+        mediaDebug.cdn_error = `HTTP ${cdnRes.status}`;
+        finalMediaUrl = rawMediaUrl;
+      }
+    } catch (err: any) {
+      mediaDebug.fetch_error = String(err?.message || err);
+      finalMediaUrl = rawMediaUrl;
+    }
+  }
+
+  // ── Step 3: If no CDN URL and no base64, try UazapiGO download API (rarely succeeds)
+  if ((isMedia || isGenericMedia) && !resolvedBase64 && !finalMediaUrl && messageId) {
+    try {
+      const downloadEndpoints = [
+        { method: 'GET', url: `${UAZAPI_URL}/download/base64?token=${UAZAPI_TOKEN}&messageId=${encodeURIComponent(messageId)}` },
+        { method: 'POST', url: `${UAZAPI_URL}/download/base64?token=${UAZAPI_TOKEN}`, body: JSON.stringify({ messageId }) },
+      ];
+
+      for (const ep of downloadEndpoints) {
+        try {
+          const opts: RequestInit = {
+            method: ep.method,
+            headers: { 'Content-Type': 'application/json', 'token': UAZAPI_TOKEN },
+            ...(ep.body ? { body: ep.body } : {}),
+          };
+          const dlRes = await fetch(ep.url, opts);
+          if (!dlRes.ok) continue;
+
+          const dlData = await dlRes.json().catch(() => null);
+          if (!dlData) continue;
+
+          const b64 = dlData.base64 || dlData.data || dlData.file || null;
+          const mime = dlData.mimetype || dlData.mime || dlData.type || null;
+
+          if (b64) {
+            resolvedBase64 = b64;
+            resolvedMimeFromDownload = mime;
+            if (mime && isGenericMedia) {
+              finalContentType = detectContentType('', mime.toLowerCase());
+              finalMime = mime;
+            }
+            break;
+          }
+        } catch (_) { continue; }
+      }
+    } catch (_) { /* Download failed */ }
+  }
+
+  // ── Step 4: Upload to Supabase Storage if we have base64 (inline or from UazapiGO API)
+  if ((isMedia || isGenericMedia) && resolvedBase64 && !finalMediaUrl && messageId && contactId) {
+    try {
+      const mimeToUse = finalMime || resolvedMimeFromDownload || 'application/octet-stream';
+      const uploadMime = mimeToUse.split(';')[0].trim();
+      const ext = extFromMime(mimeToUse, finalContentType);
+      const filePath = `${contactId}/${messageId}.${ext}`;
+      const buffer = Buffer.from(resolvedBase64, 'base64');
+
+      await sb.storage.createBucket('marpe-media', { public: true, fileSizeLimit: 52428800 }).catch(() => {});
+
+      const { error: uploadErr } = await sb.storage
+        .from('marpe-media')
+        .upload(filePath, buffer, { contentType: uploadMime, upsert: true });
+
+      if (!uploadErr) {
+        const { data: urlData } = sb.storage.from('marpe-media').getPublicUrl(filePath);
+        finalMediaUrl = urlData.publicUrl;
+        finalMime = mimeToUse;
+      }
+    } catch (_) {
+      // Storage upload failed — frontend will use proxy endpoint with wa_message_id
+    }
+  }
 
   // Save message — media_url and media_mime stored for attachment rendering in inbox
   // Note: group messages are always inbound and never trigger deals or automations
@@ -207,12 +546,29 @@ export const POST: APIRoute = async ({ request }) => {
     contact_id: contactId,
     wa_message_id: messageId || null,
     direction: isGroup ? 'inbound' : (fromMe ? 'outbound' : 'inbound'),
-    content_type: contentType,
+    content_type: finalContentType,
     body: finalBody || null,
-    media_url: mediaUrl,
-    media_mime: mediaMime,
+    media_url: finalMediaUrl,
+    media_mime: finalMime,
     status: isGroup ? 'delivered' : (fromMe ? 'sent' : 'delivered'),
-    metadata: { event_type: body.EventType, timestamp, instance: body.instanceName, is_group: isGroup },
+    metadata: {
+      event_type: body.EventType,
+      timestamp,
+      instance: body.instanceName,
+      is_group: isGroup,
+      // Debug: store raw type fields so we can inspect what UazapiGO sends
+      raw_type: messageType,
+      baileys_key: baileysType || null,
+      has_base64: !!resolvedBase64,
+      has_media_url: !!finalMediaUrl,
+      // Debug: media processing result
+      ...(isMedia || isGenericMedia ? { media_debug: mediaDebug } : {}),
+      ...(isGenericMedia ? { debug_msg_sample: JSON.stringify(msg).slice(0, 300) } : {}),
+      ...(isGroup ? {
+        sender_name: groupParticipantName || null,
+        sender_photo: groupParticipantPhoto || null,
+      } : {}),
+    },
   });
 
   // ── Chatbot de primeiro atendimento ─────────────────────────────────────────

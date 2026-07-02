@@ -20,7 +20,8 @@ export const GET: APIRoute = async ({ locals, url }) => {
   const { data: msgContacts, error: msgErr } = await sb
     .from('marpe_messages')
     .select('contact_id, created_at, body, direction, content_type')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(2000);
 
   if (msgErr) return new Response(JSON.stringify({ error: msgErr.message }), { status: 500 });
 
@@ -43,7 +44,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
 
   let query = sb
     .from('marpe_contacts')
-    .select('id, name, phone, email, city, corp_id, tags, source')
+    .select('id, name, phone, email, city, corp_id, tags, source, photo_url')
     .in('id', contactIds);
 
   if (search) {

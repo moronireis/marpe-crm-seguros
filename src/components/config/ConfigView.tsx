@@ -651,10 +651,20 @@ export default function ConfigView() {
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [loadingWa, setLoadingWa] = useState(true);
   const [loadingCorp, setLoadingCorp] = useState(true);
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'corp' | 'users' | 'funis'>('whatsapp');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'corp' | 'users' | 'funis' | 'status'>('whatsapp');
+
+  // Fix 18: Status options state
+  const [statusOptions, setStatusOptions] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [newStatusName, setNewStatusName] = useState('');
+  const [newStatusColor, setNewStatusColor] = useState('#60A5FA');
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [statusError, setStatusError] = useState('');
   const [checkingWa, setCheckingWa] = useState(false);
   const [syncingCorp, setSyncingCorp] = useState(false);
   const [syncResult, setSyncResult] = useState<string>('');
+  const [photoSyncStats, setPhotoSyncStats] = useState<{ missing_photos: number; have_photos: number } | null>(null);
+  const [photoSyncRunning, setPhotoSyncRunning] = useState(false);
+  const [photoSyncProgress, setPhotoSyncProgress] = useState<{ updated: number; skipped: number; failed: number; processed: number } | null>(null);
 
   // Chatbot toggle state
   const [chatbotEnabled, setChatbotEnabled] = useState<boolean | null>(null);
@@ -769,11 +779,81 @@ export default function ConfigView() {
     setSyncingCorp(false);
   }
 
+  function loadPhotoStats() {
+    fetch('/api/admin/sync-photos')
+      .then(r => r.json())
+      .then(d => setPhotoSyncStats(d))
+      .catch(() => {});
+  }
+
+  async function runPhotoSync() {
+    setPhotoSyncRunning(true);
+    setPhotoSyncProgress({ updated: 0, skipped: 0, failed: 0, processed: 0 });
+    let offset = 0;
+    let totalUpdated = 0, totalSkipped = 0, totalFailed = 0, totalProcessed = 0;
+
+    try {
+      while (true) {
+        const res = await fetch('/api/admin/sync-photos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 50, offset }),
+        });
+        const d = await res.json();
+        if (!res.ok) break;
+
+        totalUpdated += d.updated || 0;
+        totalSkipped += d.skipped || 0;
+        totalFailed += d.failed || 0;
+        totalProcessed += d.processed || 0;
+
+        setPhotoSyncProgress({ updated: totalUpdated, skipped: totalSkipped, failed: totalFailed, processed: totalProcessed });
+
+        if (d.done || !d.next_offset) break;
+        offset = d.next_offset;
+      }
+    } catch { /* ignore */ }
+
+    setPhotoSyncRunning(false);
+    loadPhotoStats();
+  }
+
+  // Fix 18: load status options
+  function loadStatusOptions() {
+    fetch('/api/status-options')
+      .then(r => r.json())
+      .then(d => setStatusOptions(d.options || []))
+      .catch(() => {});
+  }
+
+  async function createStatusOption() {
+    if (!newStatusName.trim()) return;
+    setSavingStatus(true);
+    setStatusError('');
+    const res = await fetch('/api/status-options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newStatusName.trim(), color: newStatusColor }),
+    });
+    const d = await res.json();
+    setSavingStatus(false);
+    if (!res.ok) { setStatusError(d.error || 'Erro ao criar'); return; }
+    setNewStatusName('');
+    loadStatusOptions();
+  }
+
+  async function deleteStatusOption(id: string) {
+    await fetch(`/api/status-options/${id}`, { method: 'DELETE' });
+    loadStatusOptions();
+  }
+
   useEffect(() => {
     loadUsers();
     checkWa();
     loadCorp();
     loadChatbotConfig();
+    loadStatusOptions();
+    loadPhotoStats();
   }, []);
 
   async function toggleUser(user: User) {
@@ -804,6 +884,7 @@ export default function ConfigView() {
         <button style={tab(activeTab === 'corp')} onClick={() => setActiveTab('corp')}>Corp (Agia)</button>
         <button style={tab(activeTab === 'users')} onClick={() => setActiveTab('users')}>Usuários</button>
         <button style={tab(activeTab === 'funis')} onClick={() => setActiveTab('funis')}>Funis</button>
+        <button style={tab(activeTab === 'status')} onClick={() => setActiveTab('status')}>Status</button>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
@@ -927,6 +1008,71 @@ export default function ConfigView() {
                   </div>
                 </>
               )}
+            </div>
+            {/* Photo sync card */}
+            <div style={{ marginTop: 24, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 20 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Fotos dos contatos</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
+                Busca as fotos de perfil do WhatsApp para todos os contatos que ainda não têm foto. As fotos aparecem no inbox e nos cards de negócio.
+              </div>
+
+              {photoSyncStats && (
+                <div style={{ display: 'flex', gap: 16, marginBottom: 14 }}>
+                  <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '8px 14px', flex: 1, textAlign: 'center' }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>{photoSyncStats.have_photos}</div>
+                    <div style={{ fontSize: 11, color: 'var(--green)' }}>Com foto</div>
+                  </div>
+                  <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '8px 14px', flex: 1, textAlign: 'center' }}>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>{photoSyncStats.missing_photos}</div>
+                    <div style={{ fontSize: 11, color: 'var(--amber)' }}>Sem foto</div>
+                  </div>
+                </div>
+              )}
+
+              {photoSyncProgress && (
+                <div style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12 }}>
+                  <div style={{ fontWeight: 600, color: 'var(--accent-light)', marginBottom: 4 }}>
+                    {photoSyncRunning ? 'Sincronizando...' : 'Concluído'}
+                  </div>
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    {photoSyncProgress.processed} processados ·{' '}
+                    <span style={{ color: 'var(--green)' }}>{photoSyncProgress.updated} com foto</span> ·{' '}
+                    {photoSyncProgress.skipped} sem foto ·{' '}
+                    {photoSyncProgress.failed > 0 && <span style={{ color: '#f87171' }}>{photoSyncProgress.failed} erros</span>}
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={runPhotoSync}
+                disabled={photoSyncRunning}
+                style={{
+                  padding: '8px 16px', borderRadius: 8, border: 'none',
+                  background: photoSyncRunning ? 'rgba(59,130,246,0.3)' : 'var(--accent)',
+                  color: '#fff', fontSize: 12, cursor: photoSyncRunning ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit', fontWeight: 500,
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                }}
+              >
+                {photoSyncRunning ? (
+                  <>
+                    <svg style={{ animation: 'spin 1s linear infinite' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                    Buscando fotos...
+                  </>
+                ) : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                    </svg>
+                    Sincronizar fotos
+                  </>
+                )}
+              </button>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.5 }}>
+                Processa em lotes de 50 contatos. Fotos futuras são capturadas automaticamente via webhook quando um contato envia mensagem.
+              </p>
             </div>
           </div>
         )}
@@ -1071,6 +1217,78 @@ export default function ConfigView() {
                     {u.is_active ? 'Desativar' : 'Ativar'}
                   </button>
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Fix 18: Status Options Management */}
+        {activeTab === 'status' && (
+          <div style={{ maxWidth: 520 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Opções de Status</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 20 }}>
+              Crie opções de status personalizadas para os negócios. Cada status tem uma cor associada que aparece nos cards do funil.
+            </div>
+
+            {/* Add new option */}
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>Nova opção</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <input
+                  value={newStatusName}
+                  onChange={e => setNewStatusName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') createStatusOption(); }}
+                  placeholder="Ex: Aguardando documentos"
+                  style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit' }}
+                />
+                <input
+                  type="color"
+                  value={newStatusColor}
+                  onChange={e => setNewStatusColor(e.target.value)}
+                  title="Cor do status"
+                  style={{ width: 36, height: 36, padding: 2, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-primary)', cursor: 'pointer' }}
+                />
+                <button
+                  onClick={createStatusOption}
+                  disabled={savingStatus || !newStatusName.trim()}
+                  style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: newStatusName.trim() ? 'var(--accent)' : 'rgba(59,130,246,0.2)', color: newStatusName.trim() ? '#fff' : 'var(--text-muted)', fontSize: 13, cursor: newStatusName.trim() ? 'pointer' : 'not-allowed', fontFamily: 'inherit', fontWeight: 500 }}
+                >
+                  {savingStatus ? 'Criando...' : 'Adicionar'}
+                </button>
+              </div>
+              {/* Color presets */}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Cores rápidas:</span>
+                {COLOR_PRESETS.map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setNewStatusColor(c)}
+                    style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: `2px solid ${newStatusColor === c ? '#fff' : 'transparent'}`, cursor: 'pointer', padding: 0, outline: 'none' }}
+                  />
+                ))}
+              </div>
+              {statusError && <div style={{ fontSize: 11, color: '#f87171', marginTop: 8 }}>{statusError}</div>}
+            </div>
+
+            {/* Existing options */}
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+              Opções cadastradas ({statusOptions.length})
+            </div>
+            {statusOptions.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '16px 0', fontStyle: 'italic' }}>
+                Nenhuma opção cadastrada. Enquanto vazio, o status é um campo de texto livre.
+              </div>
+            ) : statusOptions.map(opt => (
+              <div key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 8 }}>
+                <span style={{ width: 12, height: 12, borderRadius: '50%', background: opt.color, flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)' }}>{opt.name}</span>
+                <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-muted)' }}>{opt.color}</span>
+                <button
+                  onClick={() => deleteStatusOption(opt.id)}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#f87171', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  Remover
+                </button>
               </div>
             ))}
           </div>

@@ -163,6 +163,35 @@ export default function ContactDetailView({ contactId }: Props) {
   const [editEmail, setEditEmail] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Corp sync state
+  const [corpSyncing, setCorpSyncing] = useState(false);
+  const [corpSyncResult, setCorpSyncResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function syncCorp() {
+    if (!contact?.corp_id || corpSyncing) return;
+    setCorpSyncing(true);
+    setCorpSyncResult(null);
+    try {
+      const r = await fetch('/api/corp/sync-contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ corp_id: Number(contact.corp_id) }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        const { contact: cr, deals: dr } = d.result;
+        setCorpSyncResult({ ok: true, msg: `Contato: ${cr.updated > 0 ? 'atualizado' : 'sem mudanças'} · Negócios: ${dr.created} criados, ${dr.updated} atualizados` });
+        load(); // refresh the page data
+      } else {
+        setCorpSyncResult({ ok: false, msg: d.error || 'Erro na sincronização' });
+      }
+    } catch (e: any) {
+      setCorpSyncResult({ ok: false, msg: 'Erro de rede' });
+    }
+    setCorpSyncing(false);
+    setTimeout(() => setCorpSyncResult(null), 6000);
+  }
+
   function load() {
     fetch(`/api/contacts/${contactId}`)
       .then(r => r.json())
@@ -366,6 +395,40 @@ export default function ContactDetailView({ contactId }: Props) {
             <InfoRow label="Origem"     value={contact.source} />
             <InfoRow label="Cadastro"   value={fmtDate(contact.created_at)} />
             {lastMessageAt && <InfoRow label="Última mensagem" value={fmtDateTime(lastMessageAt)} />}
+
+            {contact.corp_id && (
+              <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button
+                  onClick={syncCorp}
+                  disabled={corpSyncing}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px',
+                    background: corpSyncing ? 'rgba(59,130,246,0.08)' : 'rgba(59,130,246,0.12)',
+                    border: '1px solid rgba(59,130,246,0.28)', borderRadius: 8,
+                    color: corpSyncing ? 'var(--text-muted)' : 'var(--accent-light)',
+                    fontSize: 12, fontWeight: 600, cursor: corpSyncing ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', transition: 'all 0.18s', width: '100%', justifyContent: 'center',
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                    style={{ animation: corpSyncing ? 'spin 1s linear infinite' : 'none' }}>
+                    <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                    <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                  </svg>
+                  {corpSyncing ? 'Sincronizando Corp...' : 'Sincronizar Corp'}
+                </button>
+                {corpSyncResult && (
+                  <div style={{
+                    fontSize: 11, padding: '6px 10px', borderRadius: 6,
+                    background: corpSyncResult.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+                    border: `1px solid ${corpSyncResult.ok ? 'rgba(34,197,94,0.22)' : 'rgba(239,68,68,0.22)'}`,
+                    color: corpSyncResult.ok ? '#4ade80' : '#f87171',
+                  }}>
+                    {corpSyncResult.msg}
+                  </div>
+                )}
+              </div>
+            )}
 
             <SectionLabel>Notas</SectionLabel>
             {editing ? (
