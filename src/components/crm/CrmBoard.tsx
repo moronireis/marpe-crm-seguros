@@ -589,7 +589,7 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
           <div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
               <input type="checkbox" checked={form.ja_possui_produto} onChange={e => setForm(f => ({ ...f, ja_possui_produto: e.target.checked }))} style={{ accentColor: 'var(--accent)', margin: 0 }} />
-              Cliente ja possui o produto
+              Cliente já possui o produto
             </label>
           </div>
           {form.ja_possui_produto && (
@@ -610,17 +610,17 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
           )}
 
           <div>
-            <label style={LABEL_S}>Proxima Acao</label>
-            <textarea value={form.next_action} onChange={field('next_action')} rows={2} placeholder="Proxima acao ou observacao..." style={{ ...INPUT_S, resize: 'vertical', minHeight: 52 }} />
+            <label style={LABEL_S}>Próxima Ação</label>
+            <textarea value={form.next_action} onChange={field('next_action')} rows={2} placeholder="Próxima ação ou observação..." style={{ ...INPUT_S, resize: 'vertical', minHeight: 52 }} />
           </div>
 
           <div>
-            <label style={LABEL_S}>Data de Aproximacao</label>
+            <label style={LABEL_S}>Data da Próxima Ação</label>
             <input type="date" value={form.next_action_date} onChange={field('next_action_date')} style={INPUT_S} />
           </div>
 
           <div>
-            <label style={LABEL_S}>Observacoes da Proposta</label>
+            <label style={LABEL_S}>Observações da Proposta</label>
             <textarea value={form.observacoes_proposta} onChange={field('observacoes_proposta')} rows={2} placeholder="Detalhes adicionais..." style={{ ...INPUT_S, resize: 'vertical', minHeight: 52 }} />
           </div>
 

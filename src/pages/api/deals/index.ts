@@ -40,13 +40,25 @@ export const POST: APIRoute = async ({ locals, request }) => {
   }
 
   const sb = createServerClient();
+
+  // marpe_deals.title is NOT NULL — generate it server-side when the UI doesn't send one
+  let title: string = body.title?.trim();
+  if (!title) {
+    const { data: contact } = await sb
+      .from('marpe_contacts')
+      .select('name')
+      .eq('id', body.contact_id)
+      .single();
+    title = [contact?.name || 'Contato', body.ramo].filter(Boolean).join(' — ');
+  }
+
   const { data, error } = await sb
     .from('marpe_deals')
     .insert({
       contact_id: body.contact_id,
       funnel_id: body.funnel_id,
       stage_id: body.stage_id,
-      title: body.title || null,
+      title,
       ramo: body.ramo || null,
       seguradora: body.seguradora || null,
       apolice: body.apolice || null,
@@ -86,7 +98,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     type: 'creation',
     description: 'Negócio criado',
     metadata: { contact_name: data.marpe_contacts?.name || null },
-  }).catch(() => {});
+  }).then(null, () => {});
 
   return new Response(JSON.stringify({ deal: data }), { status: 201 });
 };

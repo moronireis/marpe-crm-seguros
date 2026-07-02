@@ -145,7 +145,7 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
       type: 'field_update',
       description: desc.slice(0, 500),
       metadata: { changes },
-    }).catch(() => {});
+    }).then(null, () => {});
   }
 
   return new Response(JSON.stringify({ deal: data }), { status: 200 });

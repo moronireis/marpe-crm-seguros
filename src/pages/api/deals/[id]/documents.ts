@@ -81,13 +81,13 @@ export const POST: APIRoute = async ({ locals, request, params }) => {
     type: 'document_upload',
     description: `Documento anexado: ${file.name}`,
     metadata: { document_id: data.id, file_name: file.name, file_size: buffer.length },
-  }).catch(() => {});
+  }).then(null, () => {});
 
   // Update deal last_activity
   await sb.from('marpe_deals')
     .update({ last_activity: new Date().toISOString() })
     .eq('id', id)
-    .catch(() => {});
+    .then(null, () => {});
 
   return new Response(JSON.stringify({ document: data }), { status: 201 });
 };
@@ -141,7 +141,7 @@ export const DELETE: APIRoute = async ({ locals, request, params }) => {
     type: 'document_delete',
     description: `Documento removido: ${doc.file_name}`,
     metadata: { file_name: doc.file_name },
-  }).catch(() => {});
+  }).then(null, () => {});
 
   return new Response(JSON.stringify({ ok: true }), { status: 200 });
 };

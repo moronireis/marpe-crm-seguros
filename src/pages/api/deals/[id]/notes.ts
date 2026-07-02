@@ -61,13 +61,13 @@ export const POST: APIRoute = async ({ locals, request, params }) => {
     type: 'note_added',
     description: `Nota adicionada`,
     metadata: { note_id: data.id, preview: body.content.trim().slice(0, 100) },
-  }).catch(() => {});
+  }).then(null, () => {});
 
   // Update deal last_activity
   await sb.from('marpe_deals')
     .update({ last_activity: new Date().toISOString() })
     .eq('id', id)
-    .catch(() => {});
+    .then(null, () => {});
 
   return new Response(JSON.stringify({ note: data }), { status: 201 });
 };
