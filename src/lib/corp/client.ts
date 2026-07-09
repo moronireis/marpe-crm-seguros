@@ -266,9 +266,27 @@ export async function createEmail(opts: { codcli: number; email: string; padrao?
 // every payload — including exact mirrors of records created in the Corp UI.
 // Awaiting Agia's payload spec. Callers gate this behind the marpe_settings key
 // corp_write_negocio ({ enabled: false } until Agia answers).
+// Campos obrigatórios descobertos por bissecção 2026-07-09 (doc oficial Postman
+// documenter.getpostman.com/view/33455116/2sAYkBrLmi): sem etapa/status/prioridade/
+// datinc/datalt/campo_base_r o Corp responde 500 "Negócio não inserido".
+// Resposta de sucesso: 201 { message: "Negócio inserido.", codigo_negocio }.
 export async function createNegocio(payload: Record<string, any>): Promise<number> {
-  const res = await corpWrite<{ codigo: number }>('/negocio', 'POST', payload);
-  return res.codigo;
+  const brt = new Date().toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  }); // "09/07/2026, 16:33"
+  const [datalt, hora] = brt.split(', ');
+  const res = await corpWrite<{ message: string; codigo_negocio: number }>('/negocio', 'POST', {
+    etapa: 1,
+    status: 0,
+    prioridade: 3,
+    datinc: `${datalt} ${hora}`,
+    datalt,
+    campo_base_r: 5,
+    ...payload,
+  });
+  if (!res.codigo_negocio) throw new Error(`Corp POST /negocio sem codigo_negocio: ${JSON.stringify(res)}`);
+  return res.codigo_negocio;
 }
 
 // ===== PRODUCAO =====

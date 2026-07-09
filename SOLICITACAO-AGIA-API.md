@@ -1,55 +1,39 @@
 # Solicitação à Agia (Corp Nuvem) — API de Integração
 
-> Gerado em 2026-07-09. Pronto para o Tiago enviar por e-mail ao suporte/TI da Agia.
-> Contexto: integração do CRM da Marca Corretora de Seguros com a API api.corpnuvem.com.
+> Gerado em 2026-07-09, revisado após a doc oficial (documenter.getpostman.com/view/33455116/2sAYkBrLmi).
+> A doc resolveu o POST /negocio (payload obrigatório: etapa, status, prioridade, datinc, datalt, campo_base_r) —
+> dual-write CRM↔Corp já está no ar. Restam 2 perguntas. Pronto para o Tiago enviar por e-mail.
 
 ---
 
 **Para:** Suporte / TI — Agia (Corp Nuvem)
-**Assunto:** API Corp Nuvem — especificação do POST /negocio, dados bancários e upload de anexos
+**Assunto:** API Corp Nuvem — dados bancários do cliente e upload de anexos
 
 ---
 
 Olá, equipe Agia,
 
-Somos a equipe de tecnologia que atende a **Marca Corretora de Seguros** (Marcel Foletto, São Sepé/RS). Estamos integrando o CRM da corretora à API do Corp Nuvem (`api.corpnuvem.com`), autenticando com as credenciais do próprio cliente.
+Somos a equipe de tecnologia que atende a **Marca Corretora de Seguros** (Marcel Foletto, São Sepé/RS). Estamos integrando o CRM da corretora à API do Corp Nuvem (`api.corpnuvem.com`), autenticando com as credenciais do próprio cliente. Com a documentação publicada no Postman, a integração avançou muito bem — leitura completa e criação de clientes e negociações já estão operacionais.
 
-A integração de leitura está funcionando muito bem (clientes, negócios em andamento, ramos, seguradoras, produtores, atendimentos e anexos), e a criação de clientes via `POST /cliente` + `/telefone` + `/endereco` + `/email` também está operacional.
+Ficaram apenas dois pontos que não localizamos na documentação:
 
-Precisamos de apoio em três pontos:
+## 1. Dados bancários do cliente
 
-## 1. POST /negocio — especificação do payload
+Existe endpoint para **consultar os dados bancários** cadastrados no cliente (aba "Dados Bancários" do Cadastro de Clientes — banco, titular, conta, observações)? Não encontramos essa rota na documentação nem no retorno do `GET /cliente`. Se existir, poderiam indicar o caminho e os parâmetros?
 
-Ao criar negociações via API, o endpoint retorna sempre **HTTP 500 "Negócio não inserido"**, mesmo enviando payloads que espelham campo a campo negociações criadas na interface do Corp (validamos os nomes dos campos contra o retorno do `GET /negocio`). Exemplo simplificado do que testamos:
+## 2. Upload de anexos de cliente/negociação
 
-```json
-{
-  "codfil": 1,
-  "codcli": 440,
-  "codram": 3,
-  "codcia": 39,
-  "tipo": 1,
-  "val_premio": 800,
-  "per_c": 10,
-  "observacoes": "Teste de integração"
-}
-```
-
-Poderiam nos enviar a **especificação do payload** (campos obrigatórios, formatos e valores esperados) ou um **exemplo funcional de requisição**? Esse é o único ponto que bloqueia a gravação de negócios pelo CRM em ambos os sistemas.
-
-## 2. Dados bancários do cliente
-
-Existe endpoint para **consultar os dados bancários** cadastrados no cliente (aba "Dados Bancários" do Cadastro de Clientes — banco, titular, conta, observações)? Não localizamos essa rota na API. Se existir, poderiam indicar o caminho e os parâmetros?
-
-## 3. Upload de anexos
-
-Os endpoints `GET /cliente_anexos` e `GET /negocio_anexos` funcionam perfeitamente (inclusive com as URLs pré-assinadas para download). Existe rota para **enviar anexos via API** (para cliente e/ou negociação)? O preflight OPTIONS indica apenas GET nesses caminhos.
+Os endpoints `GET /cliente_anexos` e `GET /negocio_anexos` funcionam perfeitamente (inclusive com as URLs pré-assinadas para download). Existe rota para **enviar anexos avulsos** a um cliente ou a uma negociação via API? Vimos o fluxo **InCorp** (`incorp_url_post` → upload S3 → `incorp` → `incorp_contexto` → `incorp_documento`), mas ele parece específico para importação de documentos/propostas — se ele também atender anexos avulsos de cliente/negociação, poderiam confirmar o uso correto?
 
 ---
-
-**Bônus:** se houver documentação geral da API (PDF, Swagger/OpenAPI ou portal do desenvolvedor), agradecemos muito o compartilhamento — reduziria o vai-e-vem com o suporte.
 
 Obrigado!
 
 **Tiago Donicht** — u4digital
 *(em nome de Marcel Foletto — Marca Corretora de Seguros)*
+
+---
+
+## Anexo — Histórico resolvido (não enviar, referência interna)
+
+- ~~POST /negocio retornava 500 "Negócio não inserido"~~ → **RESOLVIDO 2026-07-09** via doc oficial: além dos campos de negócio, o payload exige `etapa` (1), `status` (0), `prioridade` (3), `datinc` ("dd/mm/yyyy hh:mm"), `datalt` ("dd/mm/yyyy") e `campo_base_r` (5 = Com. Corretora). Sucesso: 201 `{ "message": "Negócio inserido.", "codigo_negocio": N }`. `DELETE /negocio?codfil=1&codigo=N` também validado.

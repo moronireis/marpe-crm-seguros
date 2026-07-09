@@ -158,6 +158,8 @@ QR code is returned in `/instance/connect` response as `data:image/png;base64,..
 
 ## Corp API Endpoints
 
+**Official docs (Postman)**: https://documenter.getpostman.com/view/33455116/2sAYkBrLmi — "CorpAPI" (shared by Tiago 2026-07-09). Collection JSON downloadable via `documenter.gw.postman.com/api/collections/33455116/2sAYkBrLmi?segregateAuth=true&versionTag=latest`.
+
 All authenticated via `POST /login` → Bearer token (3-day expiry, refreshed after 2 days).
 
 | Endpoint | Returns |
@@ -176,6 +178,15 @@ All authenticated via `POST /login` → Bearer token (3-day expiry, refreshed af
 | `/documentos_bi` | BI data |
 | `/cliente_anexos` | Client attachments — `?codfil=1&codigo={codcli}`, presigned S3 URLs (expiring) |
 | `/negocio_anexos` | Negotiation attachments — `?codfil=1&codigo={codneg}`, presigned S3 URLs (expiring) |
+
+More endpoints in the official doc, not yet consumed by the CRM (useful for Fases 2/3):
+
+- `/documento_anexos?codfil=1&nosnum=` — policy attachments; `/documento_endossos?codfil=1&nosnum=` — endorsements (**solves U7**); `/itens` — policy items
+- `/cliente_cpf?codfil=1&cpf_cnpj=` and `/busca_cpf?cpf_cnpj=` — CPF lookup (dedupe for Novo Cliente); `/cliente_ligacoes?codigo=` — client relationships
+- `/negocios_finalizados`, `/negocios_em_calculo` — additional negotiation lists; `/lista_ramos?telram=1`; `/prod_docs` (GET/POST/PATCH/DELETE)
+- `PUT /telefone`, `PUT /email`, `PUT /endereco` (+ DELETEs) — contact sub-resource updates (bidirectional contact sync)
+- `POST /cliente` accepts nested `enderecos[]`, `emails[]`, `telefones[]` in a single call (per doc; current CRM flow uses 4 calls and works)
+- **InCorp** document-import pipeline: `GET /incorp_url_post?nome_arquivo=` → presigned S3 form POST → `GET /incorp_url_download?key=` → `POST /incorp {link}` (parses the file) → `POST /incorp_contexto` (+agente/produtor) → `POST /incorp_documento` (+`path_anexo_s3`) — creates a documento with attachment. Import-specific; not a generic client/negotiation anexo upload.
 
 ## Key Design Decisions
 
@@ -197,10 +208,11 @@ Write endpoints discovered by disposable-record testing (POST → GET → DELETE
 | `POST /endereco` | ✅ Working | `{ padrao: 'T', codcli, tipo: 'R', cep, logradouro, numero, complemento, bairro, cidade, estado }` |
 | `POST /email` | ✅ Working | `{ padrao: 'T', codcli, email }` |
 | `DELETE /cliente` | ✅ Working | query `?codfil=1&codigo=X` |
-| `POST /negocio` | ❌ Corp-side failure | Field names validated (match GET response), but every payload returns 500 "Negócio não inserido" — even mirrors of records created in the Corp UI. **Waiting on Agia support for the payload spec.** |
+| `POST /negocio` | ✅ Working (2026-07-09) | Requires `etapa:1, status:0, prioridade:3, datinc:"dd/mm/yyyy hh:mm", datalt:"dd/mm/yyyy", campo_base_r:5` + business fields (codfil, codcli, codram, codcia, tipo, val_premio, per_c...). Without the 6 state/date fields → 500 "Negócio não inserido". Success: 201 `{ codigo_negocio }`. Discovered via the official Postman doc + bisection. |
+| `DELETE /negocio` | ✅ Working | query `?codfil=1&codigo=X` → `{ "message": "Negócio deletado" }` |
 
 - "Novo Cliente" button (CRM board) → creates in Corp first (cliente + telefone + endereço + email), then `marpe_contacts` with `corp_id`. Corp failure = nothing created; CRM failure = Corp rollback via DELETE.
-- "Novo Negócio" modal → pick-lists live from Corp (`/api/corp/lookups`: seguradoras, ramos, produtores, agentes + campanhas from synced deals). Corp dual-write is implemented in `POST /api/deals` but **gated by the `marpe_settings` key `corp_write_negocio`** (`{ enabled: false }`). Flip to `true` once Agia answers.
+- "Novo Negócio" modal → pick-lists live from Corp (`/api/corp/lookups`: seguradoras, ramos, produtores, agentes + campanhas from synced deals). Corp dual-write in `POST /api/deals` is **ENABLED** (flag `corp_write_negocio` `{ enabled: true }` since 2026-07-09). The created deal stores `corp_id` in the sync format `neg_1_{codigo_negocio}` — plain numbers would make the next sync create a duplicate deal.
 - Extra GET endpoints available: `/seguradoras`, `/agentes`, `/profissoes`, `/atendimentos` (14K+ tarefas — useful for U6).
 - Unknown Corp routes return AWS Gateway 403 ("Credential parameter"); real routes return 200/4xx/5xx. OPTIONS reveals allowed methods safely.
 

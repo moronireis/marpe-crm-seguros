@@ -60,9 +60,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   }
 
   // Dual-write no Corp — atrás da flag corp_write_negocio ({ enabled: true } liga).
-  // O POST /negocio da Agia responde "Negócio não inserido" para qualquer payload
-  // (testado 2026-07-08, inclusive espelhando registros criados na UI deles);
-  // quando responderem com o spec, basta ligar a flag em marpe_settings.
+  // Payload obrigatório resolvido em 2026-07-09 via doc oficial (ver createNegocio).
   let corpDealId: string | null = null;
   if (contact?.corp_id) {
     const { data: flag } = await sb
@@ -83,8 +81,11 @@ export const POST: APIRoute = async ({ locals, request }) => {
           per_c: body.comissao_pct ? Number(body.comissao_pct) : 0,
           per_r: body.pct_repasse ? Number(body.pct_repasse) : 0,
           produto_ja_possui: body.ja_possui_produto ? 'T' : 'F',
+          ...(body.base_calculo_repasse ? { campo_base_r: Number(body.base_calculo_repasse) } : {}),
         });
-        corpDealId = String(codigo);
+        // Mesmo formato do sync (neg_{codfil}_{codigo}) — senão o próximo sync
+        // não reconhece o vínculo e cria um deal duplicado no CRM.
+        corpDealId = `neg_1_${codigo}`;
       } catch (e: any) {
         return new Response(JSON.stringify({ error: `Corp não aceitou o negócio: ${e.message}` }), { status: 502 });
       }
