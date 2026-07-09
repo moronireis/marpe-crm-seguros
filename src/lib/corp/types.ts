@@ -171,3 +171,10 @@ export interface CorpSinistro {
   situacao: string;
   data_ocorrencia: string;
 }
+
+export interface CorpAnexo {
+  nome: string;
+  tipo: string;          // extensão com ponto: ".jpe", ".pdf"...
+  url: string;           // S3 pré-assinada — expira, nunca cachear/persistir
+  indice_anexo: number;
+}

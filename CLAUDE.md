@@ -70,7 +70,7 @@ src/
     api-auth.ts                       # Auth middleware (requireAuth, requireAdmin)
     access.ts                         # Authorization helpers
   pages/
-    api/                              # 34 REST API endpoints
+    api/                              # 36 REST API endpoints
     contato/[id].astro                # Contact detail page
     crm/index.astro                   # CRM board page
     config/index.astro                # Settings page
@@ -174,6 +174,8 @@ All authenticated via `POST /login` → Bearer token (3-day expiry, refreshed af
 | `/produtores` | Producer list |
 | `/producao` | Production report |
 | `/documentos_bi` | BI data |
+| `/cliente_anexos` | Client attachments — `?codfil=1&codigo={codcli}`, presigned S3 URLs (expiring) |
+| `/negocio_anexos` | Negotiation attachments — `?codfil=1&codigo={codneg}`, presigned S3 URLs (expiring) |
 
 ## Key Design Decisions
 
@@ -201,6 +203,13 @@ Write endpoints discovered by disposable-record testing (POST → GET → DELETE
 - "Novo Negócio" modal → pick-lists live from Corp (`/api/corp/lookups`: seguradoras, ramos, produtores, agentes + campanhas from synced deals). Corp dual-write is implemented in `POST /api/deals` but **gated by the `marpe_settings` key `corp_write_negocio`** (`{ enabled: false }`). Flip to `true` once Agia answers.
 - Extra GET endpoints available: `/seguradoras`, `/agentes`, `/profissoes`, `/atendimentos` (14K+ tarefas — useful for U6).
 - Unknown Corp routes return AWS Gateway 403 ("Credential parameter"); real routes return 200/4xx/5xx. OPTIONS reveals allowed methods safely.
+
+### Corp Anexos (2026-07-09)
+
+- `GET /cliente_anexos?codfil=1&codigo={codcli}` and `GET /negocio_anexos?codfil=1&codigo={codneg}` → `{ header: { count }, anexos: [{ nome, tipo, url, indice_anexo }] }`. The `url` is a presigned S3 link that expires — fetch on demand, never cache/persist. Param MUST be `codigo` (other names → 500). No attachments → 404 `"Nenhum anexo encontrado..."` (treated as empty list in `lib/corp/client.ts`).
+- Both routes are **GET-only** (OPTIONS preflight: `GET,OPTIONS`) — no anexo upload via API. Asked Agia (see `SOLICITACAO-AGIA-API.md`).
+- **Dados bancários are NOT exposed by the Corp API** (not in `GET /cliente`, ~20 candidate routes all 403). Also asked Agia.
+- CRM surface: `GET /api/corp/anexos?cliente={corp_id contato}&negocio={corp_id deal}` (no-store) feeds the read-only "Anexos do Corp" section in the deal panel's Documentos tab. `GET /api/corp/negocio?codigo=` was also created — the Perfil tab already called it, but the route was missing (latent bug fixed).
 
 ## Remaining Work
 

@@ -1,4 +1,4 @@
-import type { CorpLoginResponse, CorpCliente, CorpClienteDetail, CorpDocumento, CorpNegocio, CorpNegocioDetail, CorpRamo, CorpProdutor, CorpSeguradora, CorpAgente, CorpProfissao } from './types';
+import type { CorpLoginResponse, CorpCliente, CorpClienteDetail, CorpDocumento, CorpNegocio, CorpNegocioDetail, CorpRamo, CorpProdutor, CorpSeguradora, CorpAgente, CorpProfissao, CorpAnexo } from './types';
 
 const CORP_URL = import.meta.env.CORP_API_URL || 'https://api.corpnuvem.com';
 const CORP_EMAIL = import.meta.env.CORP_API_EMAIL || '';
@@ -109,6 +109,35 @@ export async function getNegocio(codigo: number): Promise<CorpNegocioDetail | nu
     codfil: String(CODFIL), codigo: String(codigo),
   });
   return data.negocio?.[0] || null;
+}
+
+// ===== ANEXOS =====
+// GET-only no Corp (OPTIONS: GET apenas — não há upload via API).
+// As URLs retornadas são S3 pré-assinadas e expiram: buscar na hora do uso, nunca persistir.
+// Sem anexos o Corp responde 404 {"message":"Nenhum anexo encontrado..."} — tratado como lista vazia.
+
+export async function getClienteAnexos(codigo: number): Promise<CorpAnexo[]> {
+  try {
+    const data = await corpFetch<{ header: { count: number }; anexos: CorpAnexo[] }>('/cliente_anexos', {
+      codfil: String(CODFIL), codigo: String(codigo),
+    });
+    return data.anexos || [];
+  } catch (e) {
+    if (String(e).includes('Nenhum anexo')) return [];
+    throw e;
+  }
+}
+
+export async function getNegocioAnexos(codigo: number): Promise<CorpAnexo[]> {
+  try {
+    const data = await corpFetch<{ header: { count: number }; anexos: CorpAnexo[] }>('/negocio_anexos', {
+      codfil: String(CODFIL), codigo: String(codigo),
+    });
+    return data.anexos || [];
+  } catch (e) {
+    if (String(e).includes('Nenhum anexo')) return [];
+    throw e;
+  }
 }
 
 // ===== SINISTROS =====

@@ -7,7 +7,7 @@ import DealTabDocumentos from './DealTabDocumentos';
 import DealTabPerfil from './DealTabPerfil';
 
 interface Stage { id: string; name: string; color: string; sort_order: number; is_terminal?: boolean; terminal_type?: string | null; }
-interface Contact { id: string; name: string; phone: string | null; email: string | null; city: string | null; tags: string[]; }
+interface Contact { id: string; name: string; phone: string | null; email: string | null; city: string | null; tags: string[]; corp_id: string | null; }
 interface Activity { id: string; type: string; description: string; created_at: string; metadata: Record<string, any> | null; user_id: string | null; }
 interface Deal {
   id: string; title: string; ramo: string | null; seguradora: string | null; apolice: string | null;
@@ -299,7 +299,11 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
         )}
 
         {activeTab === 'documentos' && (
-          <DealTabDocumentos dealId={dealId} />
+          <DealTabDocumentos
+            dealId={dealId}
+            dealCorpId={deal.corp_id}
+            contactCorpId={deal.marpe_contacts?.corp_id ?? null}
+          />
         )}
 
         {activeTab === 'perfil' && (
