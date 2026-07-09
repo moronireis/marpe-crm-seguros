@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
+import { createNegocio } from '../../../lib/corp/client';
 
 export const prerender = false;
 
@@ -46,21 +47,55 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   const sb = createServerClient();
 
+  const { data: contact } = await sb
+    .from('marpe_contacts')
+    .select('name, corp_id')
+    .eq('id', body.contact_id)
+    .single();
+
   // marpe_deals.title is NOT NULL — generate it server-side when the UI doesn't send one
   let title: string = body.title?.trim();
   if (!title) {
-    const { data: contact } = await sb
-      .from('marpe_contacts')
-      .select('name')
-      .eq('id', body.contact_id)
-      .single();
     title = [contact?.name || 'Contato', body.ramo].filter(Boolean).join(' — ');
+  }
+
+  // Dual-write no Corp — atrás da flag corp_write_negocio ({ enabled: true } liga).
+  // O POST /negocio da Agia responde "Negócio não inserido" para qualquer payload
+  // (testado 2026-07-08, inclusive espelhando registros criados na UI deles);
+  // quando responderem com o spec, basta ligar a flag em marpe_settings.
+  let corpDealId: string | null = null;
+  if (contact?.corp_id) {
+    const { data: flag } = await sb
+      .from('marpe_settings')
+      .select('value')
+      .eq('key', 'corp_write_negocio')
+      .maybeSingle();
+    if ((flag?.value as any)?.enabled) {
+      try {
+        const codigo = await createNegocio({
+          codfil: 1,
+          codcli: parseInt(contact.corp_id),
+          ...(body.corp_codram ? { codram: body.corp_codram } : {}),
+          ...(body.corp_codcia ? { codcia: body.corp_codcia } : {}),
+          tipo: body.corp_tipo || 1,
+          ...(body.observacoes_proposta ? { observacoes: body.observacoes_proposta } : {}),
+          val_premio: body.premio ? Number(body.premio) : 0,
+          per_c: body.comissao_pct ? Number(body.comissao_pct) : 0,
+          per_r: body.pct_repasse ? Number(body.pct_repasse) : 0,
+          produto_ja_possui: body.ja_possui_produto ? 'T' : 'F',
+        });
+        corpDealId = String(codigo);
+      } catch (e: any) {
+        return new Response(JSON.stringify({ error: `Corp não aceitou o negócio: ${e.message}` }), { status: 502 });
+      }
+    }
   }
 
   const { data, error } = await sb
     .from('marpe_deals')
     .insert({
       contact_id: body.contact_id,
+      corp_id: corpDealId,
       funnel_id: body.funnel_id,
       stage_id: body.stage_id,
       title,

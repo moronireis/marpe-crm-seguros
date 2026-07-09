@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
 
 interface Contact {
   id: string; name: string; phone: string | null; email: string | null;
@@ -463,7 +464,7 @@ export default function InboxView() {
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [newMsg, setNewMsg] = useState('');
   const [sending, setSending] = useState(false);
-  const [templates, setTemplates] = useState<{ id: string; name: string; shortcut: string | null; category: string | null; body: string }[]>([]);
+  const templates = useTemplates();
   const [showTemplates, setShowTemplates] = useState(false);
   const [templateFilter, setTemplateFilter] = useState('');
   const msgEndRef = useRef<HTMLDivElement>(null);
@@ -504,14 +505,6 @@ export default function InboxView() {
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  // Load templates once
-  useEffect(() => {
-    fetch('/api/templates')
-      .then(r => r.json())
-      .then(d => setTemplates(d.templates || []))
-      .catch(() => {});
   }, []);
 
   // Load contacts + poll every 10s to catch new contacts from WhatsApp
@@ -610,28 +603,12 @@ export default function InboxView() {
   }
 
   // Select a template — replace input with template body
-  function selectTemplate(tpl: typeof templates[0]) {
+  function selectTemplate(tpl: Template) {
     setNewMsg(tpl.body);
     setShowTemplates(false);
     setTemplateFilter('');
     inputRef.current?.focus();
   }
-
-  // Filter templates by name, shortcut, or category
-  const filteredTemplates = templates.filter(t => {
-    if (!templateFilter) return true;
-    const q = templateFilter.toLowerCase();
-    return (t.name.toLowerCase().includes(q)) ||
-      (t.shortcut?.toLowerCase().replace('/', '').includes(q)) ||
-      (t.category?.toLowerCase().includes(q));
-  });
-
-  // Group filtered templates by category
-  const CATEGORY_LABELS: Record<string, string> = {
-    assistencia: 'Assistência', cobranca: 'Cobrança', comercial: 'Comercial',
-    marketing: 'Marketing', 'pos-venda': 'Pós-venda', relacionamento: 'Relacionamento',
-    renovacao: 'Renovação', sinistro: 'Sinistro',
-  };
 
   async function syncCorp() {
     if (!activeContact?.corp_id || corpSyncing) return;
@@ -944,49 +921,14 @@ export default function InboxView() {
           {/* Fix 7: groups and individual contacts both get the send area */}
           <div style={{ borderTop: '1px solid var(--border)', padding: '14px 20px', flexShrink: 0, position: 'relative' }}>
               {/* Template picker popup */}
-              {showTemplates && filteredTemplates.length > 0 && (
-                <div style={{ position: 'absolute', bottom: '100%', left: 16, right: 16, maxHeight: 340, overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 -4px 24px rgba(0,0,0,0.4)', zIndex: 50, padding: '6px 0' }}>
-                  <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)' }}>
-                    Templates {templateFilter && `· "${templateFilter}"`}
-                  </div>
-                  {(() => {
-                    const grouped: Record<string, typeof filteredTemplates> = {};
-                    for (const t of filteredTemplates) {
-                      const cat = t.category || 'outros';
-                      if (!grouped[cat]) grouped[cat] = [];
-                      grouped[cat].push(t);
-                    }
-                    return Object.entries(grouped).map(([cat, items]) => (
-                      <div key={cat}>
-                        <div style={{ padding: '6px 14px 2px', fontSize: 10, fontWeight: 600, color: 'var(--accent-light)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                          {CATEGORY_LABELS[cat] || cat}
-                        </div>
-                        {items.map(t => (
-                          <div key={t.id} onClick={() => selectTemplate(t)}
-                            style={{ padding: '8px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid rgba(255,255,255,0.03)' }}
-                            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(59,130,246,0.08)')}
-                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
-                              <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
-                                {t.body.slice(0, 80)}{t.body.length > 80 ? '...' : ''}
-                              </div>
-                            </div>
-                            {t.shortcut && (
-                              <span style={{ fontSize: 10, color: 'var(--accent-light)', background: 'rgba(59,130,246,0.1)', padding: '2px 8px', borderRadius: 4, flexShrink: 0, fontFamily: 'monospace' }}>{t.shortcut}</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ));
-                  })()}
-                </div>
-              )}
-              {showTemplates && filteredTemplates.length === 0 && templateFilter && (
-                <div style={{ position: 'absolute', bottom: '100%', left: 16, right: 16, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 -4px 24px rgba(0,0,0,0.4)', zIndex: 50, padding: '16px 20px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhum template encontrado para "/{templateFilter}"</div>
-                </div>
-              )}
+              <TemplateDropdown
+                visible={showTemplates}
+                filter={templateFilter}
+                templates={templates}
+                onSelect={selectTemplate}
+                left={16}
+                right={16}
+              />
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <input ref={inputRef} value={newMsg} onChange={e => handleMsgChange(e.target.value)}
                   onKeyDown={e => {

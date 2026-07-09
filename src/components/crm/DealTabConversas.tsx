@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
 
 interface Message {
   id: string;
@@ -23,6 +24,16 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Template picker: "/" prefix opens the dropdown (same UX as the inbox)
+  const templates = useTemplates();
+  const pickerOpen = text.startsWith('/');
+
+  function selectTemplate(tpl: Template) {
+    setText(tpl.body);
+    inputRef.current?.focus();
+  }
 
   // Filters
   const [dateFrom, setDateFrom] = useState('');
@@ -171,18 +182,28 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
 
       {/* Send input */}
       {contactPhone ? (
-        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', gap: 6, flexShrink: 0 }}>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', gap: 6, flexShrink: 0, position: 'relative' }}>
+          <TemplateDropdown
+            visible={pickerOpen}
+            filter={pickerOpen ? text.slice(1).toLowerCase() : ''}
+            templates={templates}
+            onSelect={selectTemplate}
+          />
           <input
+            ref={inputRef}
             value={text}
             onChange={e => setText(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Mensagem sobre este negócio..."
+            onKeyDown={e => {
+              if (e.key === 'Escape' && pickerOpen) { setText(''); return; }
+              if (e.key === 'Enter' && !e.shiftKey && !pickerOpen) { e.preventDefault(); handleSend(); }
+            }}
+            placeholder="Digite / para templates ou mensagem..."
             style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit' }}
           />
           <button
             onClick={handleSend}
-            disabled={sending || !text.trim()}
-            style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', opacity: sending ? 0.6 : 1 }}
+            disabled={sending || !text.trim() || pickerOpen}
+            style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', opacity: (sending || pickerOpen) ? 0.6 : 1 }}
           >
             Enviar
           </button>

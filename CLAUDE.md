@@ -184,6 +184,24 @@ All authenticated via `POST /login` → Bearer token (3-day expiry, refreshed af
 5. **Client-side filtering** — CRM filters run on the already-fetched deals array. No server-side filtering needed for ~1500 deals.
 6. **Disconnect clears data** — when WhatsApp is disconnected, all messages and WhatsApp-sourced contacts are deleted. Only Corp contacts remain.
 
+## Corp Write Integration (Backlog 2026-07-08)
+
+Write endpoints discovered by disposable-record testing (POST → GET → DELETE):
+
+| Endpoint | Status | Payload |
+|----------|--------|---------|
+| `POST /cliente` | ✅ Working | `{ nome*, pessoa, cpf_cnpj, datanas, sexo }` — other fields silently ignored or 500 |
+| `POST /telefone` | ✅ Working | `{ padrao: 'T', codcli, tipo: 'R', ddd, numero }` |
+| `POST /endereco` | ✅ Working | `{ padrao: 'T', codcli, tipo: 'R', cep, logradouro, numero, complemento, bairro, cidade, estado }` |
+| `POST /email` | ✅ Working | `{ padrao: 'T', codcli, email }` |
+| `DELETE /cliente` | ✅ Working | query `?codfil=1&codigo=X` |
+| `POST /negocio` | ❌ Corp-side failure | Field names validated (match GET response), but every payload returns 500 "Negócio não inserido" — even mirrors of records created in the Corp UI. **Waiting on Agia support for the payload spec.** |
+
+- "Novo Cliente" button (CRM board) → creates in Corp first (cliente + telefone + endereço + email), then `marpe_contacts` with `corp_id`. Corp failure = nothing created; CRM failure = Corp rollback via DELETE.
+- "Novo Negócio" modal → pick-lists live from Corp (`/api/corp/lookups`: seguradoras, ramos, produtores, agentes + campanhas from synced deals). Corp dual-write is implemented in `POST /api/deals` but **gated by the `marpe_settings` key `corp_write_negocio`** (`{ enabled: false }`). Flip to `true` once Agia answers.
+- Extra GET endpoints available: `/seguradoras`, `/agentes`, `/profissoes`, `/atendimentos` (14K+ tarefas — useful for U6).
+- Unknown Corp routes return AWS Gateway 403 ("Credential parameter"); real routes return 200/4xx/5xx. OPTIONS reveals allowed methods safely.
+
 ## Remaining Work
 
 ### Fase 2: Dados Corp Completos

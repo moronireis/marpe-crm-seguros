@@ -1,4 +1,4 @@
-import type { CorpLoginResponse, CorpCliente, CorpClienteDetail, CorpDocumento, CorpNegocio, CorpNegocioDetail, CorpRamo, CorpProdutor } from './types';
+import type { CorpLoginResponse, CorpCliente, CorpClienteDetail, CorpDocumento, CorpNegocio, CorpNegocioDetail, CorpRamo, CorpProdutor, CorpSeguradora, CorpAgente, CorpProfissao } from './types';
 
 const CORP_URL = import.meta.env.CORP_API_URL || 'https://api.corpnuvem.com';
 const CORP_EMAIL = import.meta.env.CORP_API_EMAIL || '';
@@ -137,6 +137,109 @@ export async function listProdutores(): Promise<CorpProdutor[]> {
     texto: '', codage: '1',
   });
   return data.produtores || [];
+}
+
+// ===== SEGURADORAS =====
+
+export async function listSeguradoras(): Promise<CorpSeguradora[]> {
+  const data = await corpFetch<{ header: { count: number }; seguradoras: CorpSeguradora[] }>('/seguradoras', {
+    codfil: String(CODFIL),
+  });
+  return data.seguradoras || [];
+}
+
+// ===== AGENTES =====
+
+export async function listAgentes(): Promise<CorpAgente[]> {
+  const data = await corpFetch<{ header: { count: number }; agentes: CorpAgente[] }>('/agentes', {
+    codfil: String(CODFIL),
+  });
+  return data.agentes || [];
+}
+
+// ===== PROFISSOES =====
+
+export async function listProfissoes(): Promise<CorpProfissao[]> {
+  const data = await corpFetch<{ header: { count: number }; profissoes: CorpProfissao[] }>('/profissoes', {
+    codfil: String(CODFIL),
+  });
+  return data.profissoes || [];
+}
+
+// ===== WRITE OPERATIONS =====
+// Payload shapes discovered 2026-07-08 via disposable-record tests (POST → GET → DELETE).
+// The validator rejects unknown fields, so only send keys listed here.
+
+async function corpWrite<T>(path: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: Record<string, any>): Promise<T> {
+  const token = await getToken();
+  const res = await fetch(`${CORP_URL}${path}`, {
+    method,
+    headers: { 'Authorization': token, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Corp ${method} ${path} failed: ${(err as any).message || res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// POST /cliente persists ONLY: nome, pessoa, cpf_cnpj, datanas, sexo.
+// Email/telefone/endereço have their own sub-resource endpoints; observacoes and
+// estado_civil return 500 on POST (Corp-side limitation).
+export async function createCliente(data: {
+  nome: string; pessoa?: 'F' | 'J'; cpf_cnpj?: string; datanas?: string; sexo?: string;
+}): Promise<number> {
+  const body: Record<string, any> = { nome: data.nome };
+  if (data.pessoa) body.pessoa = data.pessoa;
+  if (data.cpf_cnpj) body.cpf_cnpj = data.cpf_cnpj;
+  if (data.datanas) body.datanas = data.datanas; // accepts dd/mm/yyyy and yyyy-mm-dd
+  if (data.sexo) body.sexo = data.sexo;
+  const res = await corpWrite<{ codigo: number }>('/cliente', 'POST', body);
+  return res.codigo;
+}
+
+export async function deleteCliente(codigo: number): Promise<void> {
+  await corpWrite(`/cliente?codfil=${CODFIL}&codigo=${codigo}`, 'DELETE');
+}
+
+// tipo 'R' = Residencial (dropdown padrão do Corp); padrao 'T' marca como principal
+export async function createTelefone(opts: {
+  codcli: number; ddd: number; numero: string; tipo?: string; padrao?: 'T' | 'F';
+}): Promise<void> {
+  await corpWrite('/telefone', 'POST', {
+    padrao: opts.padrao || 'T', codcli: opts.codcli, tipo: opts.tipo || 'R',
+    ddd: opts.ddd, numero: opts.numero,
+  });
+}
+
+export async function createEndereco(opts: {
+  codcli: number; cep?: string; logradouro?: string; numero?: number; complemento?: string;
+  bairro?: string; cidade?: string; estado?: string; tipo?: string; padrao?: 'T' | 'F';
+}): Promise<void> {
+  const body: Record<string, any> = { padrao: opts.padrao || 'T', codcli: opts.codcli, tipo: opts.tipo || 'R' };
+  if (opts.cep) body.cep = opts.cep;
+  if (opts.logradouro) body.logradouro = opts.logradouro;
+  if (opts.numero != null) body.numero = opts.numero;
+  if (opts.complemento) body.complemento = opts.complemento;
+  if (opts.bairro) body.bairro = opts.bairro;
+  if (opts.cidade) body.cidade = opts.cidade;
+  if (opts.estado) body.estado = opts.estado;
+  await corpWrite('/endereco', 'POST', body);
+}
+
+export async function createEmail(opts: { codcli: number; email: string; padrao?: 'T' | 'F' }): Promise<void> {
+  await corpWrite('/email', 'POST', { padrao: opts.padrao || 'T', codcli: opts.codcli, email: opts.email });
+}
+
+// POST /negocio: field names match the GET response (garbage fields → generic 500,
+// these names → "Negócio não inserido"), but the insert itself fails Corp-side for
+// every payload — including exact mirrors of records created in the Corp UI.
+// Awaiting Agia's payload spec. Callers gate this behind the marpe_settings key
+// corp_write_negocio ({ enabled: false } until Agia answers).
+export async function createNegocio(payload: Record<string, any>): Promise<number> {
+  const res = await corpWrite<{ codigo: number }>('/negocio', 'POST', payload);
+  return res.codigo;
 }
 
 // ===== PRODUCAO =====

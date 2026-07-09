@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { DndContext, DragOverlay, useDroppable, useDraggable, PointerSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent } from '@dnd-kit/core';
 import DealPanel from './DealPanel';
+import NewContactModal from './NewContactModal';
 
 // ─── Shared input styles ──────────────────────────────────────────────────────
 const INPUT_S: React.CSSProperties = {
@@ -91,22 +92,34 @@ interface ContactOption { id: string; name: string; phone: string | null; }
 interface NewDealForm {
   contact_id: string;
   ramo: string; seguradora: string; deal_type: string;
-  premio: string; comissao_pct: string;
+  premio: string; comissao_pct: string; pct_repasse: string;
   veiculo: string; placa: string;
   next_action: string; next_action_date: string;
   // New fields
   campanha: string; ja_possui_produto: boolean;
   seguradora_atual: string; vigencia_atual_fim: string; corretora_atual: string;
-  agente: string; observacoes_proposta: string;
+  agente: string; produtor: string; observacoes_proposta: string;
 }
 const EMPTY_FORM: NewDealForm = {
   contact_id: '', ramo: '', seguradora: '', deal_type: 'prospeccao',
-  premio: '', comissao_pct: '', veiculo: '', placa: '',
+  premio: '', comissao_pct: '', pct_repasse: '', veiculo: '', placa: '',
   next_action: '', next_action_date: '',
   campanha: '', ja_possui_produto: false,
   seguradora_atual: '', vigencia_atual_fim: '', corretora_atual: '',
-  agente: '', observacoes_proposta: '',
+  agente: '', produtor: '', observacoes_proposta: '',
 };
+
+// Pick-lists integradas ao Corp (GET /api/corp/lookups). Fallback: listas fixas
+// abaixo mantêm o modal funcional se a API Corp estiver fora.
+interface CorpLookups {
+  ramos: { codigo: number; nome: string }[];
+  seguradoras: { codigo: number; nome: string }[];
+  produtores: { codigo: number; nome: string }[];
+  agentes: { codigo: number; nome: string }[];
+  campanhas: string[];
+  tipos: { codigo: number; nome: string; deal_type: string }[];
+}
+const FALLBACK_RAMOS = ['auto', 'vida', 'residencial', 'empresarial', 'equipamento', 'consorcio', 'financiamento', 'rcge'];
 
 // ─── Filter state ─────────────────────────────────────────────────────────────
 interface FilterState {
@@ -362,8 +375,17 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
   const [showDropdown, setShowDropdown] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [lookups, setLookups] = useState<CorpLookups | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Pick-lists do Corp (seguradoras/ramos/produtores/agentes + campanhas sincronizadas)
+  useEffect(() => {
+    fetch('/api/corp/lookups')
+      .then(r => r.json())
+      .then(d => setLookups(d))
+      .catch(() => {});
+  }, []);
 
   const firstStageId = funnels
     .find(f => f.id === activeFunnelId)?.stages
@@ -422,6 +444,10 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
     if (!form.contact_id) { setError('Selecione um contato.'); return; }
     if (!activeFunnelId || !firstStageId) { setError('Funil sem etapas configuradas.'); return; }
     setSubmitting(true);
+    // Códigos Corp derivados das seleções — usados pelo dual-write quando ativo
+    const corpRamo = lookups?.ramos.find(r => r.nome.toLowerCase() === form.ramo);
+    const corpCia = lookups?.seguradoras.find(s => s.nome === form.seguradora);
+    const corpTipo = lookups?.tipos.find(t => t.deal_type === form.deal_type);
     const res = await fetch('/api/deals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -434,6 +460,7 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
         deal_type: form.deal_type || 'prospeccao',
         premio: form.premio ? parseFloat(form.premio) : null,
         comissao_pct: form.comissao_pct ? parseFloat(form.comissao_pct) : null,
+        pct_repasse: form.pct_repasse ? parseFloat(form.pct_repasse) : null,
         veiculo: form.veiculo || null,
         placa: form.placa || null,
         next_action: form.next_action || null,
@@ -444,7 +471,11 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
         vigencia_atual_fim: form.vigencia_atual_fim || null,
         corretora_atual: form.corretora_atual || null,
         agente: form.agente || null,
+        produtor: form.produtor || null,
         observacoes_proposta: form.observacoes_proposta || null,
+        corp_codram: corpRamo?.codigo || null,
+        corp_codcia: corpCia?.codigo || null,
+        corp_tipo: corpTipo?.codigo || null,
       }),
     });
     const data = await res.json();
@@ -524,14 +555,9 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
               <label style={LABEL_S}>Ramo</label>
               <select value={form.ramo} onChange={field('ramo')} style={{ ...INPUT_S, cursor: 'pointer' }}>
                 <option value="">— Selecione —</option>
-                <option value="auto">Auto</option>
-                <option value="vida">Vida</option>
-                <option value="residencial">Residencial</option>
-                <option value="empresarial">Empresarial</option>
-                <option value="equipamento">Equipamento</option>
-                <option value="consorcio">Consórcio</option>
-                <option value="financiamento">Financiamento</option>
-                <option value="rcge">RCGE</option>
+                {lookups?.ramos.length
+                  ? lookups.ramos.map(r => <option key={r.codigo} value={r.nome.toLowerCase()}>{r.nome}</option>)
+                  : FALLBACK_RAMOS.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
               </select>
             </div>
             <div>
@@ -548,10 +574,17 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
 
           <div>
             <label style={LABEL_S}>Seguradora</label>
-            <input value={form.seguradora} onChange={field('seguradora')} placeholder="Ex: Porto Seguro, Bradesco..." style={INPUT_S} />
+            {lookups?.seguradoras.length ? (
+              <select value={form.seguradora} onChange={field('seguradora')} style={{ ...INPUT_S, cursor: 'pointer' }}>
+                <option value="">— Selecione —</option>
+                {lookups.seguradoras.map(s => <option key={s.codigo} value={s.nome}>{s.nome}</option>)}
+              </select>
+            ) : (
+              <input value={form.seguradora} onChange={field('seguradora')} placeholder="Ex: Porto Seguro, Bradesco..." style={INPUT_S} />
+            )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div>
               <label style={LABEL_S}>Prêmio (R$)</label>
               <input type="number" min="0" step="0.01" value={form.premio} onChange={field('premio')} placeholder="0,00" style={INPUT_S} />
@@ -559,6 +592,10 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
             <div>
               <label style={LABEL_S}>Comissão %</label>
               <input type="number" min="0" max="100" step="0.1" value={form.comissao_pct} onChange={field('comissao_pct')} placeholder="0,0" style={INPUT_S} />
+            </div>
+            <div>
+              <label style={LABEL_S}>Repasse %</label>
+              <input type="number" min="0" max="100" step="0.1" value={form.pct_repasse} onChange={field('pct_repasse')} placeholder="0,0" style={INPUT_S} />
             </div>
           </div>
 
@@ -573,15 +610,36 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
             </div>
           </div>
 
-          {/* Campanha + Agente */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {/* Campanha + Produtor + Agente */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div>
               <label style={LABEL_S}>Campanha</label>
-              <input value={form.campanha} onChange={field('campanha')} placeholder="Opcional" style={INPUT_S} />
+              <input list="corp-campanhas" value={form.campanha} onChange={field('campanha')} placeholder="Opcional" style={INPUT_S} />
+              <datalist id="corp-campanhas">
+                {(lookups?.campanhas || []).map(c => <option key={c} value={c} />)}
+              </datalist>
+            </div>
+            <div>
+              <label style={LABEL_S}>Produtor</label>
+              {lookups?.produtores.length ? (
+                <select value={form.produtor} onChange={field('produtor')} style={{ ...INPUT_S, cursor: 'pointer' }}>
+                  <option value="">—</option>
+                  {lookups.produtores.map(p => <option key={p.codigo} value={p.nome}>{p.nome}</option>)}
+                </select>
+              ) : (
+                <input value={form.produtor} onChange={field('produtor')} placeholder="Opcional" style={INPUT_S} />
+              )}
             </div>
             <div>
               <label style={LABEL_S}>Agente</label>
-              <input value={form.agente} onChange={field('agente')} placeholder="Opcional" style={INPUT_S} />
+              {lookups?.agentes.length ? (
+                <select value={form.agente} onChange={field('agente')} style={{ ...INPUT_S, cursor: 'pointer' }}>
+                  <option value="">—</option>
+                  {lookups.agentes.map(a => <option key={a.codigo} value={a.nome}>{a.nome}</option>)}
+                </select>
+              ) : (
+                <input value={form.agente} onChange={field('agente')} placeholder="Opcional" style={INPUT_S} />
+              )}
             </div>
           </div>
 
@@ -928,6 +986,8 @@ export default function CrmBoard() {
   const [visibleByStage, setVisibleByStage] = useState<Record<string, number>>({});
   const COLUMN_PAGE = 50;
   const [showNewDeal, setShowNewDeal] = useState(false);
+  const [showNewContact, setShowNewContact] = useState(false);
+  const [contactToast, setContactToast] = useState<{ msg: string; warnings: string[] } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [users, setUsers] = useState<UserOption[]>([]);
 
@@ -1314,6 +1374,27 @@ export default function CrmBoard() {
               )}
             </button>
 
+            {/* Novo Cliente */}
+            {!isMobile && (
+              <button
+                onClick={() => setShowNewContact(true)}
+                style={{
+                  padding: '7px 14px', borderRadius: 6, height: 34,
+                  border: '1px solid var(--border)', background: 'transparent',
+                  color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
+                  fontFamily: 'inherit', fontWeight: 600,
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <circle cx="4.5" cy="3.5" r="2.2" stroke="currentColor" strokeWidth="1.4"/>
+                  <path d="M1 10.5c0-1.9 1.6-3.2 3.5-3.2S8 8.6 8 10.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                  <path d="M9.5 4v4M7.5 6h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+                Novo Cliente
+              </button>
+            )}
+
             {/* Novo Negócio */}
             <button
               onClick={() => setShowNewDeal(true)}
@@ -1613,6 +1694,40 @@ export default function CrmBoard() {
           onClose={() => setShowNewDeal(false)}
           onCreated={reloadDeals}
         />
+      )}
+
+      {showNewContact && (
+        <NewContactModal
+          onClose={() => setShowNewContact(false)}
+          onCreated={(contact, warnings) => {
+            setContactToast({
+              msg: contact.corp_id
+                ? `Cliente ${contact.name} cadastrado no Corp (código ${contact.corp_id}) e no CRM.`
+                : `Cliente ${contact.name} cadastrado no CRM.`,
+              warnings,
+            });
+            // Emenda o fluxo do backlog: cadastrou o cliente → abre Novo Negócio já com ele
+            (window as any).__prefillContactId = contact.id;
+            setShowNewDeal(true);
+          }}
+        />
+      )}
+
+      {contactToast && (
+        <div
+          onClick={() => setContactToast(null)}
+          style={{
+            position: 'fixed', bottom: 20, right: 20, zIndex: 1100, maxWidth: 380,
+            background: 'var(--bg-secondary)', border: '1px solid rgba(34,197,94,0.4)',
+            borderRadius: 10, padding: '12px 16px', cursor: 'pointer',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+          }}
+        >
+          <div style={{ fontSize: 12, color: 'var(--green, #22c55e)', fontWeight: 600 }}>{contactToast.msg}</div>
+          {contactToast.warnings.map((w, i) => (
+            <div key={i} style={{ fontSize: 11, color: '#fbbf24', marginTop: 4 }}>{w}</div>
+          ))}
+        </div>
       )}
     </div>
   );

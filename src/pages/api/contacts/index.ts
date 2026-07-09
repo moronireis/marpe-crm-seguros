@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
+import { createCliente, createTelefone, createEndereco, createEmail, deleteCliente } from '../../../lib/corp/client';
 
 export const prerender = false;
 
@@ -94,6 +95,65 @@ export const POST: APIRoute = async ({ locals, request }) => {
     return new Response(JSON.stringify({ error: 'name required' }), { status: 400 });
   }
 
+  // Corp-integrated creation (botão Novo Cliente): grava no Corp PRIMEIRO, depois no
+  // CRM com o vínculo. Se o Corp recusar o cliente, nada é criado. Sub-recursos
+  // (telefone/endereço/e-mail) degradam para warnings — o cliente já existe no Corp
+  // e eles podem ser completados por lá.
+  let corpId: string | null = null;
+  let corpCodigo: number | null = null;
+  const warnings: string[] = [];
+
+  if (body.corp) {
+    try {
+      corpCodigo = await createCliente({
+        nome: body.name,
+        pessoa: body.pessoa === 'J' ? 'J' : 'F',
+        cpf_cnpj: body.cpf_cnpj || undefined,
+        datanas: body.birth_date || undefined,
+        sexo: body.sexo || undefined,
+      });
+      corpId = String(corpCodigo);
+    } catch (e: any) {
+      return new Response(JSON.stringify({ error: `Corp não aceitou o cadastro: ${e.message}` }), { status: 502 });
+    }
+
+    if (body.phone) {
+      const digits = String(body.phone).replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+      const ddd = parseInt(digits.slice(0, 2));
+      const numero = digits.slice(2);
+      if (ddd && numero.length >= 8) {
+        try { await createTelefone({ codcli: corpCodigo, ddd, numero }); }
+        catch (e: any) { warnings.push(`Telefone não gravado no Corp: ${e.message}`); }
+      } else {
+        warnings.push('Telefone em formato não reconhecido — não gravado no Corp.');
+      }
+    }
+    if (body.cep || body.logradouro || body.city) {
+      try {
+        await createEndereco({
+          codcli: corpCodigo,
+          cep: body.cep ? String(body.cep).replace(/\D/g, '') : undefined,
+          logradouro: body.logradouro || undefined,
+          numero: body.numero_end ? parseInt(body.numero_end) : undefined,
+          complemento: body.complemento || undefined,
+          bairro: body.bairro || undefined,
+          cidade: body.city || undefined,
+          estado: body.state || undefined,
+        });
+      } catch (e: any) { warnings.push(`Endereço não gravado no Corp: ${e.message}`); }
+    }
+    if (body.email) {
+      try { await createEmail({ codcli: corpCodigo, email: body.email }); }
+      catch (e: any) { warnings.push(`E-mail não gravado no Corp: ${e.message}`); }
+    }
+  }
+
+  const address = [
+    [body.logradouro, body.numero_end].filter(Boolean).join(', '),
+    body.complemento,
+    body.bairro,
+  ].filter(Boolean).join(' — ') || null;
+
   const sb = createServerClient();
   const { data, error } = await sb
     .from('marpe_contacts')
@@ -101,16 +161,28 @@ export const POST: APIRoute = async ({ locals, request }) => {
       name: body.name,
       phone: body.phone || null,
       email: body.email || null,
+      cpf_cnpj: body.cpf_cnpj || null,
+      birth_date: body.birth_date || null,
+      profession: body.profession || null,
+      address,
       city: body.city || null,
       state: body.state || null,
       tags: body.tags || [],
       notes: body.notes || null,
+      corp_id: corpId,
       source: 'manual',
       responsible_id: profile.id,
     })
     .select()
     .single();
 
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  return new Response(JSON.stringify({ contact: data }), { status: 201 });
+  if (error) {
+    // O cliente já foi criado no Corp — desfaz para não deixar registro órfão.
+    if (corpCodigo != null) {
+      try { await deleteCliente(corpCodigo); }
+      catch { warnings.push(`Cliente ${corpCodigo} ficou órfão no Corp — remova manualmente.`); }
+    }
+    return new Response(JSON.stringify({ error: error.message, warnings }), { status: 500 });
+  }
+  return new Response(JSON.stringify({ contact: data, warnings }), { status: 201 });
 };

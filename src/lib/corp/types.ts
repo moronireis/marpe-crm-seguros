@@ -88,6 +88,9 @@ export interface CorpNegocioDetail {
   cliente: string;
   codcli: number;
   ramo: string;
+  codram: number | null;
+  codcia: number | null;
+  codcamp: number | null;
   status: number;
   etapa: number;
   prioridade: number;
@@ -143,6 +146,22 @@ export interface CorpRamo {
 export interface CorpProdutor {
   codigo: number;
   nome: string;
+}
+
+export interface CorpSeguradora {
+  codigo: number;
+  nome: string;
+  abreviatura: string;
+}
+
+export interface CorpAgente {
+  codigo: number;
+  nome: string;
+}
+
+export interface CorpProfissao {
+  codigo: number;
+  profissao: string;
 }
 
 export interface CorpSinistro {
