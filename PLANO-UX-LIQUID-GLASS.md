@@ -1,7 +1,7 @@
 # Plano UX/UI — Liquid Glass Redesign — Marpe CRM
 
 Last updated: 2026-07-10
-Status: F0–F4 IMPLEMENTADAS — preview na Vercel aguardando aprovação para F5 (QA + prod)
+Status: EM PRODUÇÃO desde 2026-07-10 (commit cc2d37f, aprovado por Moroni via preview). Restam itens de polish opcionais da F5 (auditoria cross-browser/mobile aprofundada, count-up nos KPIs).
 
 > Progresso 2026-07-10: F0 (tokens v2 + fundo ambiente + sidebar glass + ClientRouter + login), F1 (CrmBoard + DealPanel com indicador de abas + modais glass + portal fix no modal de perda), F2 (Inbox: painéis, bolhas com gradiente, composer pílula, skeletons), F3 (Dashboard: KPIs card-surface + seções glass + skeletons), F4 (secundárias herdaram via tokens — sem modais fixos nelas). Mockup aprovado: https://claude.ai/code/artifact/52b53867-55c2-4fcd-8920-6c7bf5953ab1
 > Pendente F5: aprovação visual do Moroni no preview → QA cross-browser/mobile/reduced-motion → `vercel --prod` + push.
