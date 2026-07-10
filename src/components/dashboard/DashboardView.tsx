@@ -116,7 +116,7 @@ function progressColor(pct: number | null): string {
 function ProgressBar({ pct, color }: { pct: number | null; color: string }) {
   const clamped = Math.min(pct ?? 0, 100);
   return (
-    <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+    <div style={{ flex: 1, height: 6, background: 'var(--field-bg)', borderRadius: 99, overflow: 'hidden' }}>
       <div style={{
         height: '100%',
         width: `${clamped}%`,
@@ -175,11 +175,12 @@ function ExportMenu() {
       <button
         onClick={() => setOpen(o => !o)}
         style={{
-          padding: '7px 14px', borderRadius: 6,
-          border: '1px solid var(--border)', background: 'var(--bg-card)',
+          padding: '7px 14px', borderRadius: 10,
+          border: '1px solid var(--hairline)', background: 'var(--field-bg)',
           color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
           fontFamily: 'inherit', fontWeight: 500,
           display: 'flex', alignItems: 'center', gap: 6,
+          transition: 'all 0.2s var(--ease-out)',
         }}
       >
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
@@ -191,10 +192,9 @@ function ExportMenu() {
         </svg>
       </button>
       {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
-          background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-          borderRadius: 8, minWidth: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+        <div className="glass-modal fade-in" style={{
+          position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 200,
+          borderRadius: 12, minWidth: 180,
           overflow: 'hidden',
         }}>
           {[
@@ -209,8 +209,9 @@ function ExportMenu() {
                 padding: '10px 14px', background: 'transparent',
                 border: 'none', color: 'var(--text-secondary)',
                 fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+                transition: 'background 0.15s var(--ease-out)',
               }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               {item.label}
@@ -267,7 +268,18 @@ export default function DashboardView() {
   if (loading) return (
     <div style={padStyle}>
       <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 700 }}>Dashboard</h1>
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8 }}>Carregando dados reais da Marpe...</p>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: 14, marginTop: 20 }}>
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} className="glass-panel anim" style={{ ['--i' as any]: i, borderRadius: 'var(--radius-md)', padding: 20 }}>
+            <div className="skeleton" style={{ height: 10, width: '65%', marginBottom: 14 }} />
+            <div className="skeleton" style={{ height: 26, width: '45%' }} />
+          </div>
+        ))}
+      </div>
+      <div className="glass-panel anim" style={{ ['--i' as any]: 4, borderRadius: 'var(--radius-lg)', padding: 20, marginTop: 14 }}>
+        <div className="skeleton" style={{ height: 12, width: '30%', marginBottom: 16 }} />
+        {[0, 1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 10, width: `${85 - i * 12}%`, marginBottom: 12 }} />)}
+      </div>
     </div>
   );
 
@@ -301,26 +313,16 @@ export default function DashboardView() {
 
       {/* KPIs — 4 cols desktop, 2 cols tablet, 1 col mobile */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 10 : 14, marginTop: 20 }}>
-        {kpis.map(s => (
+        {kpis.map((s, i) => (
           <div
             key={s.label}
+            className="card-surface card-hover anim"
             style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border)',
-              borderRadius: 14,
+              ['--i' as any]: i,
+              borderRadius: 'var(--radius-md)',
               padding: isMobile ? '14px 16px' : '20px 22px',
               borderTop: `3px solid ${s.color}`,
-              boxShadow: 'var(--shadow-sm)',
-              transition: 'box-shadow 0.18s var(--ease), transform 0.18s var(--ease)',
               cursor: 'default',
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLDivElement).style.boxShadow = 'var(--shadow-md)';
-              (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)';
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLDivElement).style.boxShadow = 'var(--shadow-sm)';
-              (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
             }}
           >
             <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>{s.label}</div>
@@ -331,19 +333,19 @@ export default function DashboardView() {
 
       {/* Row 2: Ramo breakdown + Deal types */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: isMobile ? 10 : 14, marginTop: isMobile ? 10 : 14 }}>
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', boxShadow: 'var(--shadow-xs)' }}>
+        <div className="glass-panel" style={{ borderRadius: 'var(--radius-lg)', padding: '20px 22px' }}>
           <h4 style={{ fontSize: 12, fontWeight: 600, marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Negócios por ramo</h4>
           {ramoEntries.map(([ramo, count]) => (
             <div key={ramo} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <span style={{ fontSize: 11, color: 'var(--text-secondary)', width: 96, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 500 }}>{ramo}</span>
-              <div style={{ flex: 1, height: 6, background: 'var(--border)', borderRadius: 99, overflow: 'hidden' }}>
+              <div style={{ flex: 1, height: 6, background: 'var(--field-bg)', borderRadius: 99, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${(count / maxRamo) * 100}%`, background: RAMO_COLORS[ramo.toLowerCase()] || 'var(--accent)', borderRadius: 99, transition: 'width 0.5s var(--ease-out)' }} />
               </div>
               <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, width: 36, textAlign: 'right' }}>{count}</span>
             </div>
           ))}
         </div>
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', boxShadow: 'var(--shadow-xs)' }}>
+        <div className="glass-panel" style={{ borderRadius: 'var(--radius-lg)', padding: '20px 22px' }}>
           <h4 style={{ fontSize: 12, fontWeight: 600, marginBottom: 16, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>Tipo de negócio</h4>
           {Object.entries(stats.dealTypeBreakdown).sort((a, b) => b[1] - a[1]).map(([type, count]) => (
             <div key={type} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -357,7 +359,7 @@ export default function DashboardView() {
       {/* Row 3: Satisfação */}
       {stats.surveyStats && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+          <div className="glass-panel" style={{ borderRadius: 'var(--radius-lg)', padding: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <h4 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Satisfação dos clientes</h4>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -402,7 +404,7 @@ export default function DashboardView() {
                         fill="var(--amber)"
                       />
                     </svg>
-                    <div style={{ flex: 1, height: 16, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ flex: 1, height: 16, background: 'var(--field-bg)', borderRadius: 5, overflow: 'hidden' }}>
                       <div style={{
                         height: '100%',
                         width: `${(count / maxDist) * 100}%`,
@@ -454,10 +456,10 @@ export default function DashboardView() {
               { label: 'Próximos 90d', value: stats.renewalPipeline.upcoming90, color: 'var(--amber)' },
               { label: 'Vencidos',     value: stats.renewalPipeline.overdue,    color: 'var(--red)' },
             ].map(card => (
-              <div key={card.label} style={{
-                background: 'var(--bg-card)', border: '1px solid var(--border)',
+              <div key={card.label} className="card-surface card-hover" style={{
                 borderTop: `2px solid ${card.color}`,
-                borderRadius: 12, padding: 16,
+                borderRadius: 'var(--radius-md)', padding: 16,
+                cursor: 'default',
               }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{card.label}</div>
                 <div style={{ fontSize: 26, fontWeight: 700, color: card.color, marginTop: 8, letterSpacing: '-0.02em' }}>{card.value}</div>
@@ -473,7 +475,7 @@ export default function DashboardView() {
         const maxConvTotal = convRamo[0]?.total || 1;
         return (
           <div style={{ marginTop: 14 }}>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+            <div className="glass-panel" style={{ borderRadius: 'var(--radius-lg)', padding: 20 }}>
               <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 16 }}>Conversão por ramo (estágios finais)</h4>
               {convRamo.map(item => (
                 <div key={item.ramo} style={{ marginBottom: 12 }}>
@@ -489,7 +491,7 @@ export default function DashboardView() {
                       </span>
                     </div>
                   </div>
-                  <div style={{ height: 8, background: 'var(--border)', borderRadius: 4, overflow: 'hidden', display: 'flex' }}>
+                  <div style={{ height: 8, background: 'var(--field-bg)', borderRadius: 4, overflow: 'hidden', display: 'flex' }}>
                     <div style={{
                       width: `${(item.won / maxConvTotal) * 100}%`,
                       background: 'var(--green)', borderRadius: '4px 0 0 4px',
@@ -512,7 +514,7 @@ export default function DashboardView() {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: isMobile ? 10 : 14, marginTop: isMobile ? 10 : 14 }}>
 
         {/* Activity Feed */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+        <div className="glass-panel" style={{ borderRadius: 'var(--radius-lg)', padding: 20 }}>
           <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 16 }}>Atividade recente</h4>
           {(!stats.recentActivity || stats.recentActivity.length === 0) ? (
             <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma atividade registrada.</p>
@@ -531,7 +533,7 @@ export default function DashboardView() {
                     )}
                     <div style={{
                       width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                      background: 'var(--bg-secondary)', border: `1px solid ${icon.color}`,
+                      background: 'var(--field-bg)', border: `1px solid ${icon.color}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       marginTop: 2,
                     }}>
@@ -562,7 +564,7 @@ export default function DashboardView() {
 
           {/* Automations */}
           {stats.automationStats && (
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+            <div className="glass-panel" style={{ borderRadius: 'var(--radius-lg)', padding: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                   <path d="M8 1v3M8 12v3M1 8h3M12 8h3M3.5 3.5l2.1 2.1M10.4 10.4l2.1 2.1M3.5 12.5l2.1-2.1M10.4 5.6l2.1-2.1" stroke="var(--accent)" strokeWidth="1.6" strokeLinecap="round"/>
@@ -584,7 +586,7 @@ export default function DashboardView() {
 
           {/* Messages */}
           {stats.messageStats && (
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+            <div className="glass-panel" style={{ borderRadius: 'var(--radius-lg)', padding: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                   <path d="M2 3h12v8H2zM2 3l6 5 6-5" stroke="var(--green)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
@@ -724,7 +726,7 @@ function GoalsSection({
   }
 
   return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginTop: 14 }}>
+    <div className="glass-panel" style={{ borderRadius: 'var(--radius-lg)', padding: 20, marginTop: 14 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <h4 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Metas por Produtor</h4>
@@ -733,7 +735,7 @@ function GoalsSection({
             value={goalMonth}
             onChange={e => setGoalMonth(Number(e.target.value))}
             style={{
-              background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6,
+              background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9,
               color: 'var(--text-primary)', fontSize: 12, padding: '4px 8px', cursor: 'pointer',
               fontFamily: 'inherit',
             }}
@@ -746,7 +748,7 @@ function GoalsSection({
             value={goalYear}
             onChange={e => setGoalYear(Number(e.target.value))}
             style={{
-              background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6,
+              background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9,
               color: 'var(--text-primary)', fontSize: 12, padding: '4px 8px', cursor: 'pointer',
               fontFamily: 'inherit',
             }}
@@ -796,7 +798,7 @@ function GoalsSection({
                   }
                 }}
                 style={{
-                  background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6,
+                  background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9,
                   color: 'var(--text-primary)', fontSize: 13, padding: '6px 10px', fontFamily: 'inherit',
                 }}
               />
@@ -806,7 +808,7 @@ function GoalsSection({
                 value={vals.target_premio}
                 onChange={e => setEditMap(prev => ({ ...prev, [key]: { ...prev[key], target_premio: e.target.value } }))}
                 style={{
-                  background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6,
+                  background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9,
                   color: 'var(--text-primary)', fontSize: 13, padding: '6px 10px', fontFamily: 'inherit',
                 }}
               />
@@ -816,7 +818,7 @@ function GoalsSection({
                 value={vals.target_deals}
                 onChange={e => setEditMap(prev => ({ ...prev, [key]: { ...prev[key], target_deals: e.target.value } }))}
                 style={{
-                  background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6,
+                  background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9,
                   color: 'var(--text-primary)', fontSize: 13, padding: '6px 10px', fontFamily: 'inherit',
                 }}
               />
@@ -876,10 +878,9 @@ function GoalsSection({
             return (
               <div
                 key={row.producer_name}
+                className="card-surface"
                 style={{
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
+                  borderRadius: 'var(--radius-md)',
                   padding: '14px 16px',
                 }}
               >

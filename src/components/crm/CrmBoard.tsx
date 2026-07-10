@@ -5,10 +5,11 @@ import NewContactModal from './NewContactModal';
 
 // ─── Shared input styles ──────────────────────────────────────────────────────
 const INPUT_S: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', padding: '8px 10px',
-  background: 'var(--bg-card)', border: '1px solid var(--border)',
-  borderRadius: 8, color: 'var(--text-primary)', fontSize: 13,
+  width: '100%', boxSizing: 'border-box', padding: '8px 11px',
+  background: 'var(--field-bg)', border: '1px solid var(--hairline)',
+  borderRadius: 10, color: 'var(--text-primary)', fontSize: 13,
   fontFamily: 'inherit', outline: 'none',
+  transition: 'border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out)',
 };
 const LABEL_S: React.CSSProperties = {
   display: 'block', fontSize: 11, color: 'var(--text-muted)',
@@ -40,11 +41,12 @@ function DroppableColumn({ id, children }: { id: string; children: React.ReactNo
         overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
-        background: isOver ? 'rgba(59,130,246,0.04)' : 'transparent',
-        borderRadius: 8,
-        transition: 'background 0.15s',
-        paddingBottom: 8,
+        gap: 9,
+        background: isOver ? 'var(--accent-dim)' : 'transparent',
+        boxShadow: isOver ? 'inset 0 0 0 1px rgba(59,130,246,0.35), 0 0 24px var(--accent-dim)' : 'none',
+        borderRadius: 12,
+        transition: 'background 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out)',
+        padding: '2px 2px 8px',
       }}
     >
       {children}
@@ -226,9 +228,10 @@ function MultiSelectFilter({
           height: 32,
           boxSizing: 'border-box',
           padding: '0 8px',
-          background: isActive ? 'rgba(59,130,246,0.06)' : 'var(--bg-card)',
-          border: `1px solid ${isActive ? 'rgba(59,130,246,0.5)' : 'var(--border)'}`,
-          borderRadius: 6,
+          background: isActive ? 'var(--accent-dim)' : 'var(--field-bg)',
+          border: `1px solid ${isActive ? 'rgba(59,130,246,0.5)' : 'var(--hairline)'}`,
+          borderRadius: 9,
+          transition: 'border-color 0.2s var(--ease-out), background 0.2s var(--ease-out)',
           color: isActive ? 'var(--accent-light)' : 'var(--text-secondary)',
           fontSize: 12,
           fontFamily: 'inherit',
@@ -258,14 +261,11 @@ function MultiSelectFilter({
       </button>
 
       {open && (
-        <div style={{
+        <div className="glass-modal fade-in" style={{
           position: 'absolute',
           zIndex: 200,
           marginTop: 56,
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
-          borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+          borderRadius: 12,
           minWidth: width,
           maxHeight: 280,
           overflowY: 'auto',
@@ -489,21 +489,18 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
 
   return (
     <div
+      className="overlay-glass"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
     >
-      <div style={{
-        background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-        borderRadius: 14, width: 520, maxHeight: '90vh',
+      <div className="glass-modal modal-pop" style={{
+        borderRadius: 'var(--radius-xl)', width: 520, maxWidth: 'calc(100vw - 32px)', maxHeight: '90vh',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <span style={{ fontSize: 15, fontWeight: 600 }}>Novo Negócio</span>
-          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontFamily: 'inherit' }}>✕</button>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Novo Negócio</span>
+          <button onClick={onClose} aria-label="Fechar" style={{ width: 30, height: 30, borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit', transition: 'all 0.2s var(--ease-out)' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -524,13 +521,13 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
                 <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-muted)' }}>...</span>
               )}
               {showDropdown && contactOptions.length > 0 && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4, maxHeight: 200, overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
+                <div className="glass-modal fade-in" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, borderRadius: 12, marginTop: 6, maxHeight: 200, overflowY: 'auto' }}>
                   {contactOptions.map(c => (
                     <div
                       key={c.id}
                       onMouseDown={() => selectContact(c)}
-                      style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.04)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(59,130,246,0.08)')}
+                      style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.15s var(--ease-out)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
                       <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>{c.name}</div>
@@ -540,7 +537,7 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
                 </div>
               )}
               {showDropdown && contactOptions.length === 0 && !contactLoading && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4, padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
+                <div className="glass-modal fade-in" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, borderRadius: 12, marginTop: 6, padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
                   Nenhum contato encontrado
                 </div>
               )}
@@ -689,15 +686,23 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
           )}
         </form>
 
-        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', gap: 10, justifyContent: 'flex-end', flexShrink: 0 }}>
-          <button type="button" onClick={onClose} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--hairline)', display: 'flex', gap: 10, justifyContent: 'flex-end', flexShrink: 0 }}>
+          <button type="button" onClick={onClose} style={{ padding: '8px 18px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500, transition: 'all 0.2s var(--ease-out)' }}>
             Cancelar
           </button>
           <button
             type="button"
             onClick={handleSubmit as unknown as React.MouseEventHandler}
             disabled={!canSubmit}
-            style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: canSubmit ? 'var(--accent)' : 'rgba(59,130,246,0.3)', color: canSubmit ? '#fff' : 'var(--text-muted)', fontSize: 13, fontWeight: 600, cursor: canSubmit ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}
+            style={{
+              padding: '8px 20px', borderRadius: 10,
+              border: canSubmit ? '1px solid rgba(255,255,255,0.18)' : '1px solid transparent',
+              background: canSubmit ? 'linear-gradient(180deg, #4F8FF7, #2E6BE6)' : 'rgba(59,130,246,0.25)',
+              boxShadow: canSubmit ? '0 3px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)' : 'none',
+              color: canSubmit ? '#fff' : 'var(--text-muted)', fontSize: 13, fontWeight: 600,
+              cursor: canSubmit ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+              transition: 'all 0.22s var(--ease-out)',
+            }}
           >
             {submitting ? 'Criando...' : 'Criar Negócio'}
           </button>
@@ -721,13 +726,14 @@ function ExportFunnelButton({ funnelId }: { funnelId: string }) {
       disabled={!funnelId}
       title="Exportar negócios do funil como CSV"
       style={{
-        padding: '7px 14px', borderRadius: 6,
-        border: '1px solid var(--border)', background: 'var(--bg-card)',
+        padding: '7px 14px', borderRadius: 10, height: 34,
+        border: '1px solid var(--hairline)', background: 'var(--field-bg)',
         color: funnelId ? 'var(--text-secondary)' : 'var(--text-muted)',
         fontSize: 12, cursor: funnelId ? 'pointer' : 'not-allowed',
         fontFamily: 'inherit', fontWeight: 500,
         display: 'flex', alignItems: 'center', gap: 6,
         opacity: funnelId ? 1 : 0.5,
+        transition: 'all 0.2s var(--ease-out)',
       }}
     >
       <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
@@ -815,27 +821,30 @@ function FilterBar({
 
   const filterInputStyle: React.CSSProperties = {
     boxSizing: 'border-box', padding: '0 8px', height: 32,
-    background: 'var(--bg-card)', border: '1px solid var(--border)',
-    borderRadius: 6, color: 'var(--text-primary)', fontSize: 12,
+    background: 'var(--field-bg)', border: '1px solid var(--hairline)',
+    borderRadius: 9, color: 'var(--text-primary)', fontSize: 12,
     fontFamily: 'inherit', outline: 'none', minWidth: 0,
+    transition: 'border-color 0.2s var(--ease-out), background 0.2s var(--ease-out)',
   };
 
   const activeFilterStyle: React.CSSProperties = {
     ...filterInputStyle,
     borderColor: 'rgba(59,130,246,0.5)',
-    background: 'rgba(59,130,246,0.06)',
+    background: 'var(--accent-dim)',
   };
 
   return (
-    <div style={{
-      padding: '10px 24px 14px',
-      borderBottom: '1px solid var(--border)',
-      background: 'var(--bg-secondary)',
+    <div className="glass-panel fade-in" style={{
+      margin: '8px 16px 0',
+      padding: '10px 16px 14px',
+      borderRadius: 'var(--radius-md)',
       display: 'flex',
       flexWrap: 'wrap',
       gap: 10,
       alignItems: 'flex-start',
       position: 'relative',
+      zIndex: 20,
+      flexShrink: 0,
     }}>
       {/* Row 1: multi-select filters */}
       <MultiSelectFilter
@@ -981,7 +990,6 @@ export default function CrmBoard() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeDealId, setActiveDealId] = useState<string | null>(null);
-  const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
   // Per-column render cap (Emitido has 4k+ deals — rendering all would freeze the DOM)
   const [visibleByStage, setVisibleByStage] = useState<Record<string, number>>({});
   const COLUMN_PAGE = 50;
@@ -1283,12 +1291,15 @@ export default function CrmBoard() {
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
 
         {/* ── Topbar ─────────────────────────────────────────────────────────── */}
-        <div style={{
-          minHeight: 56, borderBottom: showFilters ? 'none' : '1px solid var(--border)',
+        <div className="glass-nav anim" style={{
+          minHeight: 56,
+          margin: isMobile ? '8px 8px 0' : '12px 16px 0',
+          borderRadius: 'var(--radius-lg)',
           display: 'flex', alignItems: 'center',
-          padding: isMobile ? '10px 12px' : '0 24px',
+          padding: isMobile ? '10px 12px' : '8px 18px',
           gap: isMobile ? 8 : 12, flexShrink: 0,
           flexWrap: isMobile ? 'wrap' : 'nowrap',
+          position: 'relative', zIndex: 25,
         }}>
           {!isMobile && <span style={{ fontSize: 16, fontWeight: 600 }}>Funis</span>}
 
@@ -1297,10 +1308,11 @@ export default function CrmBoard() {
             value={activeFunnelId}
             onChange={e => setActiveFunnelId(e.target.value)}
             style={{
-              background: 'var(--bg-card)', border: '1px solid var(--border)',
-              borderRadius: 8, padding: '8px 12px', color: 'var(--text-primary)',
+              background: 'var(--field-bg)', border: '1px solid var(--hairline)',
+              borderRadius: 10, padding: '8px 12px', color: 'var(--text-primary)',
               fontSize: 13, fontFamily: 'inherit', outline: 'none', cursor: 'pointer',
               flex: isMobile ? 1 : 'none',
+              transition: 'border-color 0.2s var(--ease-out)',
             }}
           >
             {funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -1320,10 +1332,11 @@ export default function CrmBoard() {
               style={{
                 width: '100%', boxSizing: 'border-box',
                 paddingLeft: 28, paddingRight: searchRaw ? 28 : 10,
-                height: 34, background: 'var(--bg-card)',
-                border: `1px solid ${searchRaw ? 'rgba(59,130,246,0.4)' : 'var(--border)'}`,
-                borderRadius: 8, color: 'var(--text-primary)', fontSize: 12,
+                height: 34, background: 'var(--field-bg)',
+                border: `1px solid ${searchRaw ? 'rgba(59,130,246,0.4)' : 'var(--hairline)'}`,
+                borderRadius: 999, color: 'var(--text-primary)', fontSize: 12,
                 fontFamily: 'inherit', outline: 'none',
+                transition: 'border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out)',
               }}
             />
             {searchRaw && (
@@ -1353,12 +1366,13 @@ export default function CrmBoard() {
             <button
               onClick={() => setShowFilters(v => !v)}
               style={{
-                padding: '7px 12px', borderRadius: 6, height: 34,
-                border: `1px solid ${showFilters || activeFilterCount > 0 ? 'rgba(59,130,246,0.4)' : 'var(--border)'}`,
-                background: showFilters || activeFilterCount > 0 ? 'rgba(59,130,246,0.08)' : 'transparent',
-                color: showFilters || activeFilterCount > 0 ? 'var(--accent-light)' : 'var(--text-muted)',
+                padding: '7px 12px', borderRadius: 10, height: 34,
+                border: `1px solid ${showFilters || activeFilterCount > 0 ? 'rgba(59,130,246,0.4)' : 'var(--hairline)'}`,
+                background: showFilters || activeFilterCount > 0 ? 'var(--accent-dim)' : 'var(--field-bg)',
+                color: showFilters || activeFilterCount > 0 ? 'var(--accent-light)' : 'var(--text-secondary)',
                 fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500,
                 display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+                transition: 'all 0.2s var(--ease-out)',
               }}
             >
               <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
@@ -1379,11 +1393,12 @@ export default function CrmBoard() {
               <button
                 onClick={() => setShowNewContact(true)}
                 style={{
-                  padding: '7px 14px', borderRadius: 6, height: 34,
-                  border: '1px solid var(--border)', background: 'transparent',
+                  padding: '7px 14px', borderRadius: 10, height: 34,
+                  border: '1px solid var(--hairline)', background: 'var(--field-bg)',
                   color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
                   fontFamily: 'inherit', fontWeight: 600,
                   display: 'flex', alignItems: 'center', gap: 5,
+                  transition: 'all 0.2s var(--ease-out)',
                 }}
               >
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -1399,11 +1414,14 @@ export default function CrmBoard() {
             <button
               onClick={() => setShowNewDeal(true)}
               style={{
-                padding: '7px 14px', borderRadius: 6, height: 34,
-                border: '1px solid rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.12)',
-                color: 'var(--accent-light)', fontSize: 12, cursor: 'pointer',
+                padding: '7px 15px', borderRadius: 10, height: 34,
+                border: '1px solid rgba(255,255,255,0.18)',
+                background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)',
+                boxShadow: '0 3px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)',
+                color: '#fff', fontSize: 12, cursor: 'pointer',
                 fontFamily: 'inherit', fontWeight: 600,
                 display: 'flex', alignItems: 'center', gap: 5,
+                transition: 'all 0.22s var(--ease-out)',
               }}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -1418,11 +1436,13 @@ export default function CrmBoard() {
             {!isMobile && (['kanban', 'grade'] as const).map(m => (
               <button key={m} onClick={() => setViewMode(m)}
                 style={{
-                  padding: '7px 14px', borderRadius: 6, height: 34,
-                  border: `1px solid ${viewMode === m ? 'rgba(59,130,246,0.3)' : 'var(--border)'}`,
-                  background: viewMode === m ? 'var(--accent-dim)' : 'transparent',
+                  padding: '7px 14px', borderRadius: 10, height: 34,
+                  border: `1px solid ${viewMode === m ? 'rgba(59,130,246,0.3)' : 'var(--hairline)'}`,
+                  background: viewMode === m ? 'var(--accent-dim)' : 'var(--field-bg)',
                   color: viewMode === m ? 'var(--accent-light)' : 'var(--text-muted)',
                   fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500,
+                  boxShadow: viewMode === m ? 'inset 0 1px 0 var(--highlight)' : 'none',
+                  transition: 'all 0.2s var(--ease-out)',
                 }}
               >
                 {m === 'kanban' ? 'Kanban' : 'Grade'}
@@ -1433,7 +1453,7 @@ export default function CrmBoard() {
 
         {/* ── Fix 19: Color legend for ramo tags ─────────────────────────── */}
         {!isMobile && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '6px 24px', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '8px 22px 0', flexShrink: 0 }}>
             <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Ramo:</span>
             {Object.entries(RAMO_COLORS).map(([ramo, { color }]) => (
               <span key={ramo} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -1458,32 +1478,40 @@ export default function CrmBoard() {
 
         {/* ── Mobile result count ─────────────────────────────────────────── */}
         {isMobile && isFiltering && (
-          <div style={{ padding: '6px 12px', fontSize: 12, color: 'var(--accent)', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ padding: '6px 12px', fontSize: 12, color: 'var(--accent)' }}>
             {filteredDeals.length} resultado{filteredDeals.length !== 1 ? 's' : ''}
           </div>
         )}
 
         {/* ── Content ─────────────────────────────────────────────────────── */}
         {loading ? (
-          <div style={{ padding: 32, color: 'var(--text-muted)', fontSize: 13 }}>Carregando negócios...</div>
+          /* Skeleton do board enquanto os negócios carregam */
+          <div style={{ flex: 1, overflow: 'hidden', padding: 16, display: 'flex', gap: 12 }}>
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="glass-panel anim" style={{ ['--i' as any]: i, minWidth: 280, maxWidth: 280, borderRadius: 'var(--radius-lg)', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="skeleton" style={{ height: 14, width: '55%', marginBottom: 4 }} />
+                {[0, 1, 2].map(j => (
+                  <div key={j} className="skeleton" style={{ height: 84, borderRadius: 12 }} />
+                ))}
+              </div>
+            ))}
+          </div>
         ) : viewMode === 'kanban' ? (
           /* ── Kanban with drag-and-drop ────────────────────────────────── */
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             {/* Fix 9: flex:1 + overflow:hidden lets each column control its own scroll */}
-            <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: 20, display: 'flex', gap: 14, minHeight: 0 }}>
-              {stages.map(stage => {
+            <div style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden', padding: 16, display: 'flex', gap: 12, minHeight: 0 }}>
+              {stages.map((stage, stageIdx) => {
                 const stageDeals = dealsByStage(stage.id);
                 const sum = stageDeals.reduce((a, d) => a + (d.premio || 0), 0);
                 return (
-                  /* Fix 9: column wrapper is flex-col with overflow:hidden.
-                     Header is fixed (flexShrink:0), DroppableColumn handles scrolling. */
-                  <div key={stage.id} style={{ minWidth: 280, maxWidth: 280, display: 'flex', flexDirection: 'column', flexShrink: 0, minHeight: 0, height: '100%' }}>
-                    {/* Fix 9: Sticky column header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 4px 10px', flexShrink: 0, borderBottom: `2px solid ${stage.color}22`, marginBottom: 2 }}>
-                      <div style={{ width: 9, height: 9, borderRadius: '50%', background: stage.color, flexShrink: 0, boxShadow: `0 0 6px ${stage.color}88` }} />
-                      <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>{stage.name}</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', background: 'var(--bg-card)', border: '1px solid var(--border)', padding: '1px 8px', borderRadius: 99, marginLeft: 'auto' }}>{stageDeals.length}</span>
-                      {sum > 0 && <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>{formatPremio(sum)}</span>}
+                  /* Coluna = painel de vidro. Header fixo, DroppableColumn rola. */
+                  <div key={stage.id} className="glass-panel anim" style={{ ['--i' as any]: stageIdx + 1, minWidth: 280, maxWidth: 280, display: 'flex', flexDirection: 'column', flexShrink: 0, minHeight: 0, height: '100%', borderRadius: 'var(--radius-lg)', padding: '0 8px 8px', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 8px 10px', flexShrink: 0, borderBottom: '1px solid var(--hairline)', marginBottom: 8 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: stage.color, flexShrink: 0, boxShadow: `0 0 8px ${stage.color}88` }} />
+                      <span style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{stage.name}</span>
+                      <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-secondary)', background: 'var(--field-bg)', border: '1px solid var(--hairline)', padding: '1px 8px', borderRadius: 999, marginLeft: 'auto', flexShrink: 0 }}>{stageDeals.length}</span>
+                      {sum > 0 && <span style={{ fontSize: 10, color: 'var(--green)', fontWeight: 700, flexShrink: 0 }}>{formatPremio(sum)}</span>}
                     </div>
                     {/* Fix 9: scrollable area */}
                     <DroppableColumn id={stage.id}>
@@ -1493,19 +1521,19 @@ export default function CrmBoard() {
                         return (
                           <DraggableCard key={d.id} id={d.id}>
                             <div
+                              className="card-surface card-hover"
                               onClick={() => setActiveDealId(d.id)}
-                              onMouseEnter={() => setHoveredCardId(d.id)}
-                              onMouseLeave={() => setHoveredCardId(null)}
                               style={{
-                                background: activeDealId === d.id ? 'rgba(59,130,246,0.06)' : hoveredCardId === d.id ? 'var(--bg-card-hover)' : 'var(--bg-card)',
-                                border: `1px solid ${activeDealId === d.id ? 'rgba(59,130,246,0.3)' : hoveredCardId === d.id ? 'var(--border-accent)' : 'var(--border)'}`,
                                 borderLeft: `3px solid ${r.color}`,
-                                borderRadius: 10,
-                                padding: 14,
+                                borderRadius: 12,
+                                padding: 13,
                                 cursor: 'grab',
-                                boxShadow: activeDealId === d.id ? 'var(--shadow-accent)' : hoveredCardId === d.id ? 'var(--shadow-sm)' : 'none',
-                                transform: hoveredCardId === d.id && activeDealId !== d.id ? 'translateY(-1px)' : 'translateY(0)',
-                                transition: 'background 0.15s var(--ease), border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.15s var(--ease)',
+                                ...(activeDealId === d.id ? {
+                                  background: 'var(--accent-dim)',
+                                  borderColor: 'rgba(59,130,246,0.35)',
+                                  borderLeftColor: r.color,
+                                  boxShadow: 'var(--shadow-accent), inset 0 1px 0 var(--highlight)',
+                                } : {}),
                               }}
                             >
                               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -1524,9 +1552,9 @@ export default function CrmBoard() {
                                 <div style={{ marginBottom: 6 }}>
                                   <span style={{
                                     fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 100,
-                                    background: 'rgba(255,255,255,0.06)',
+                                    background: 'var(--field-bg)',
                                     color: 'var(--text-secondary)',
-                                    border: '1px solid var(--border)',
+                                    border: '1px solid var(--hairline)',
                                     display: 'inline-block',
                                   }}>
                                     {d.status_custom}
@@ -1547,7 +1575,7 @@ export default function CrmBoard() {
                         );
                       })}
                       {stageDeals.length === 0 && (
-                        <div style={{ padding: 20, border: '1px dashed var(--border)', borderRadius: 10, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                        <div style={{ padding: 20, border: '1px dashed var(--hairline-strong)', borderRadius: 12, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
                           {isFiltering ? 'Nenhum resultado' : 'Nenhum negócio'}
                         </div>
                       )}
@@ -1556,8 +1584,9 @@ export default function CrmBoard() {
                           onClick={() => setVisibleByStage(v => ({ ...v, [stage.id]: (v[stage.id] || COLUMN_PAGE) + 100 }))}
                           style={{
                             fontSize: 11, color: 'var(--accent-light)', textAlign: 'center', padding: '8px 12px',
-                            background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
-                            cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+                            background: 'var(--field-bg)', border: '1px dashed var(--hairline-strong)', borderRadius: 10,
+                            cursor: 'pointer', fontFamily: 'inherit', width: '100%', fontWeight: 600,
+                            transition: 'all 0.2s var(--ease-out)',
                           }}
                         >
                           Mostrar mais ({stageDeals.length - (visibleByStage[stage.id] || COLUMN_PAGE)} restantes)
@@ -1570,7 +1599,12 @@ export default function CrmBoard() {
             </div>
             <DragOverlay>
               {draggingDealId ? (
-                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--accent)', borderRadius: 10, padding: 14, width: 264, opacity: 0.9, boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}>
+                <div className="card-surface" style={{
+                  border: '1px solid rgba(59,130,246,0.45)', borderRadius: 12, padding: 14, width: 264,
+                  transform: 'rotate(2.5deg) scale(1.04)',
+                  boxShadow: 'var(--shadow-lift), 0 0 24px var(--accent-dim)',
+                  cursor: 'grabbing',
+                }}>
                   <span style={{ fontSize: 13, fontWeight: 600 }}>
                     {deals.find(d => d.id === draggingDealId)?.marpe_contacts?.name || 'Negócio'}
                   </span>
@@ -1580,7 +1614,7 @@ export default function CrmBoard() {
           </DndContext>
         ) : (
           /* ── Grade view ───────────────────────────────────────────────── */
-          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', padding: isMobile ? '12px 0' : 20 }}>
+          <div className="glass-panel anim" style={{ ['--i' as any]: 1, flex: 1, overflowY: 'auto', overflowX: 'auto', padding: isMobile ? '12px 4px' : 16, margin: isMobile ? '8px 8px 8px' : '0 16px 16px', marginTop: 12, borderRadius: 'var(--radius-lg)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: isMobile ? 560 : 1000 }}>
               <thead>
                 <tr>
@@ -1715,12 +1749,12 @@ export default function CrmBoard() {
 
       {contactToast && (
         <div
+          className="glass-modal modal-pop"
           onClick={() => setContactToast(null)}
           style={{
             position: 'fixed', bottom: 20, right: 20, zIndex: 1100, maxWidth: 380,
-            background: 'var(--bg-secondary)', border: '1px solid rgba(34,197,94,0.4)',
-            borderRadius: 10, padding: '12px 16px', cursor: 'pointer',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            border: '1px solid rgba(34,197,94,0.4)',
+            borderRadius: 14, padding: '12px 16px', cursor: 'pointer',
           }}
         >
           <div style={{ fontSize: 12, color: 'var(--green, #22c55e)', fontWeight: 600 }}>{contactToast.msg}</div>

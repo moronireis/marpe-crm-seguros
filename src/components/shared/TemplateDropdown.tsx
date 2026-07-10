@@ -47,14 +47,13 @@ export default function TemplateDropdown({ visible, filter, templates, onSelect,
 
   const filtered = filterTemplates(templates, filter);
   const boxStyle: React.CSSProperties = {
-    position: 'absolute', bottom: '100%', left, right, zIndex: 50,
-    background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12,
-    boxShadow: '0 -4px 24px rgba(0,0,0,0.4)',
+    position: 'absolute', bottom: 'calc(100% + 10px)', left, right, zIndex: 50,
+    borderRadius: 16,
   };
 
   if (templates.length === 0) {
     return (
-      <div style={{ ...boxStyle, padding: '16px 20px', textAlign: 'center' }}>
+      <div className="glass-modal fade-in" style={{ ...boxStyle, padding: '16px 20px', textAlign: 'center' }}>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhum template cadastrado</div>
       </div>
     );
@@ -62,7 +61,7 @@ export default function TemplateDropdown({ visible, filter, templates, onSelect,
 
   if (filtered.length === 0) {
     return (
-      <div style={{ ...boxStyle, padding: '16px 20px', textAlign: 'center' }}>
+      <div className="glass-modal fade-in" style={{ ...boxStyle, padding: '16px 20px', textAlign: 'center' }}>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhum template encontrado para "/{filter}"</div>
       </div>
     );
@@ -76,8 +75,8 @@ export default function TemplateDropdown({ visible, filter, templates, onSelect,
   }
 
   return (
-    <div style={{ ...boxStyle, maxHeight: 340, overflowY: 'auto', padding: '6px 0' }}>
-      <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--border)' }}>
+    <div className="glass-modal fade-in" style={{ ...boxStyle, maxHeight: 340, overflowY: 'auto', padding: '6px 0' }}>
+      <div style={{ padding: '8px 14px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid var(--hairline)' }}>
         Templates {filter && `· "${filter}"`}
       </div>
       {Object.entries(grouped).map(([cat, items]) => (
@@ -87,8 +86,8 @@ export default function TemplateDropdown({ visible, filter, templates, onSelect,
           </div>
           {items.map(t => (
             <div key={t.id} onClick={() => onSelect(t)}
-              style={{ padding: '8px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid rgba(255,255,255,0.03)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(59,130,246,0.08)')}
+              style={{ padding: '8px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.15s var(--ease-out)' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</div>
@@ -97,7 +96,7 @@ export default function TemplateDropdown({ visible, filter, templates, onSelect,
                 </div>
               </div>
               {t.shortcut && (
-                <span style={{ fontSize: 10, color: 'var(--accent-light)', background: 'rgba(59,130,246,0.1)', padding: '2px 8px', borderRadius: 4, flexShrink: 0, fontFamily: 'monospace' }}>{t.shortcut}</span>
+                <span style={{ fontSize: 10, color: 'var(--accent-light)', background: 'var(--accent-dim)', padding: '2px 8px', borderRadius: 6, flexShrink: 0, fontFamily: 'monospace' }}>{t.shortcut}</span>
               )}
             </div>
           ))}

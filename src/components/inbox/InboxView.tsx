@@ -694,28 +694,30 @@ export default function InboxView() {
   // WhatsApp disconnected — show full-screen message
   if (waConnected === false) {
     return (
-      <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 32 }}>
-        <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(239,68,68,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <svg style={{ width: 32, height: 32, stroke: '#ef4444', fill: 'none', strokeWidth: 1.5 }} viewBox="0 0 24 24">
-            <path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-          </svg>
+      <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+        <div className="glass-modal modal-pop" style={{ borderRadius: 'var(--radius-xl)', padding: '40px 44px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, maxWidth: 440 }}>
+          <div style={{ width: 64, height: 64, borderRadius: 20, background: 'var(--red-dim)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg style={{ width: 30, height: 30, stroke: 'var(--red)', fill: 'none', strokeWidth: 1.5 }} viewBox="0 0 24 24">
+              <path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>WhatsApp desconectado</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', maxWidth: 360 }}>
+            Conecte o WhatsApp em <strong>Configurações → WhatsApp</strong> para enviar e receber mensagens.
+          </div>
+          <a href="/config" style={{ padding: '10px 22px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', boxShadow: '0 3px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)', color: '#fff', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginTop: 8, transition: 'all 0.22s var(--ease-out)' }}>
+            Ir para Configurações
+          </a>
         </div>
-        <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>WhatsApp desconectado</div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', maxWidth: 360 }}>
-          Conecte o WhatsApp em <strong>Configurações → WhatsApp</strong> para enviar e receber mensagens.
-        </div>
-        <a href="/config" style={{ padding: '10px 20px', borderRadius: 8, background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 500, textDecoration: 'none', marginTop: 8 }}>
-          Ir para Configurações
-        </a>
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', gap: 12, padding: isMobile ? 8 : '12px 16px 16px' }}>
       {/* Contact List */}
-      <div style={{ width: isMobile ? '100%' : 320, borderRight: isMobile ? 'none' : '1px solid var(--border)', display: showList ? 'flex' : 'none', flexDirection: 'column', background: 'var(--bg-secondary)', flexShrink: 0 }}>
-        <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="glass-panel anim" style={{ ['--i' as any]: 0, width: isMobile ? '100%' : 320, borderRadius: 'var(--radius-lg)', display: showList ? 'flex' : 'none', flexDirection: 'column', flexShrink: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '16px 18px 12px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, flex: 1, letterSpacing: '-0.01em' }}>Inbox</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 99, background: 'var(--green-dim)', border: '1px solid rgba(34,197,94,0.2)' }}>
             <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)' }} />
@@ -724,7 +726,7 @@ export default function InboxView() {
         </div>
 
         {/* Tab bar */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
           {(['conversas', 'grupos'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               style={{
@@ -740,17 +742,27 @@ export default function InboxView() {
           ))}
         </div>
 
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--hairline)' }}>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder={activeTab === 'grupos' ? 'Buscar grupo...' : 'Buscar contato, telefone...'}
-            style={{ width: '100%', padding: '8px 13px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.18s, box-shadow 0.18s' }}
+            style={{ width: '100%', padding: '8px 14px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 999, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.18s, box-shadow 0.18s', boxSizing: 'border-box' }}
             onFocus={e => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px var(--accent-dim)'; }}
-            onBlur={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none'; }}
+            onBlur={e => { e.target.style.borderColor = 'var(--hairline)'; e.target.style.boxShadow = 'none'; }}
           />
         </div>
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {loadingContacts ? (
-            <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>Carregando...</div>
+            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {[0, 1, 2, 3, 4].map(i => (
+                <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <div className="skeleton" style={{ width: 40, height: 40, borderRadius: '50%', flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div className="skeleton" style={{ height: 12, width: '60%', marginBottom: 6 }} />
+                    <div className="skeleton" style={{ height: 10, width: '85%' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : contacts.length === 0 ? (
             <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
               {activeTab === 'grupos' ? 'Nenhum grupo encontrado' : 'Nenhum contato encontrado'}
@@ -765,16 +777,18 @@ export default function InboxView() {
               // Fix 6: mark as read when opened
               setReadContactIds(prev => { const s = new Set(prev); s.add(c.id); return s; });
             }}
-              style={{ display: 'flex', gap: 12, padding: '11px 16px', cursor: 'pointer',
-                borderLeft: `3px solid ${activeContactId === c.id ? 'var(--accent)' : 'transparent'}`,
-                background: activeContactId === c.id ? 'rgba(59,130,246,0.07)' : 'transparent',
-                transition: 'background 0.15s, border-color 0.15s' }}
-              onMouseEnter={e => { if (activeContactId !== c.id) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.03)'; }}
+              style={{ display: 'flex', gap: 12, padding: '10px 10px', cursor: 'pointer',
+                borderRadius: 12, marginBottom: 2,
+                border: `1px solid ${activeContactId === c.id ? 'var(--hairline)' : 'transparent'}`,
+                background: activeContactId === c.id ? 'var(--accent-dim)' : 'transparent',
+                boxShadow: activeContactId === c.id ? 'inset 0 1px 0 var(--highlight)' : 'none',
+                transition: 'background 0.18s var(--ease-out), border-color 0.18s var(--ease-out)' }}
+              onMouseEnter={e => { if (activeContactId !== c.id) (e.currentTarget as HTMLDivElement).style.background = 'var(--field-bg)'; }}
               onMouseLeave={e => { if (activeContactId !== c.id) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
             >
               {/* Avatar — photo if available, else initials/group icon */}
               <div style={{ position: 'relative', flexShrink: 0 }}>
-                <div style={{ width: 40, height: 40, borderRadius: isGroup ? 10 : '50%', background: isGroup ? 'rgba(6,182,212,0.15)' : '#1e1e30', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: isGroup ? '#22d3ee' : nameColor(c.name), border: isGroup ? '1px solid rgba(6,182,212,0.3)' : 'none', overflow: 'hidden' }}>
+                <div style={{ width: 40, height: 40, borderRadius: isGroup ? 10 : '50%', background: isGroup ? 'rgba(6,182,212,0.15)' : 'var(--field-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: isGroup ? '#22d3ee' : nameColor(c.name), border: isGroup ? '1px solid rgba(6,182,212,0.3)' : 'none', overflow: 'hidden' }}>
                   {c.photo_url
                     ? <img src={c.photo_url} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: isGroup ? 10 : '50%' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                     : (isGroup ? 'G' : getInitials(c.name))
@@ -782,7 +796,7 @@ export default function InboxView() {
                 </div>
                 {/* Fix 6: Unread dot — shown when last message is inbound and contact hasn't been opened this session */}
                 {c.last_message_direction === 'inbound' && activeContactId !== c.id && !readContactIds.has(c.id) && (
-                  <div style={{ position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--bg-secondary)', boxSizing: 'content-box' }} />
+                  <div style={{ position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--bg-primary)', boxShadow: '0 0 8px var(--accent-glow)', boxSizing: 'content-box' }} />
                 )}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -808,8 +822,8 @@ export default function InboxView() {
 
       {/* Chat Area */}
       {activeContact && showChat ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-primary)' }}>
-          <div style={{ height: 62, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 12, flexShrink: 0, background: 'var(--bg-secondary)' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+          <div className="glass-nav anim" style={{ ['--i' as any]: 1, height: 62, borderRadius: 'var(--radius-lg)', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 12, flexShrink: 0 }}>
             {/* Back button — mobile only */}
             {isMobile && (
               <button
@@ -822,7 +836,7 @@ export default function InboxView() {
                 </svg>
               </button>
             )}
-            <div style={{ width: 38, height: 38, borderRadius: isGroupContact ? 8 : '50%', background: isGroupContact ? 'rgba(6,182,212,0.15)' : '#1e1e30', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, color: isGroupContact ? '#22d3ee' : nameColor(activeContact.name), border: isGroupContact ? '1px solid rgba(6,182,212,0.3)' : 'none', overflow: 'hidden' }}>
+            <div style={{ width: 38, height: 38, borderRadius: isGroupContact ? 8 : '50%', background: isGroupContact ? 'rgba(6,182,212,0.15)' : 'var(--field-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, color: isGroupContact ? '#22d3ee' : nameColor(activeContact.name), border: isGroupContact ? '1px solid rgba(6,182,212,0.3)' : 'none', overflow: 'hidden' }}>
               {activeContact.photo_url
                 ? <img src={activeContact.photo_url} alt={activeContact.name} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: isGroupContact ? 8 : '50%' }} onError={e => { const el = e.currentTarget; el.style.display = 'none'; const parent = el.parentElement; if (parent) parent.dataset.showInitials = 'true'; }} />
                 : (isGroupContact ? 'G' : getInitials(activeContact.name))
@@ -836,9 +850,14 @@ export default function InboxView() {
             </div>
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="glass-panel anim" style={{ ['--i' as any]: 2, flex: 1, borderRadius: 'var(--radius-lg)', overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {loadingMsgs ? (
-              <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 40 }}>Carregando mensagens...</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8 }}>
+                <div className="skeleton" style={{ height: 44, width: '46%', borderRadius: 14, alignSelf: 'flex-start' }} />
+                <div className="skeleton" style={{ height: 44, width: '52%', borderRadius: 14, alignSelf: 'flex-end' }} />
+                <div className="skeleton" style={{ height: 34, width: '38%', borderRadius: 14, alignSelf: 'flex-start' }} />
+                <div className="skeleton" style={{ height: 52, width: '48%', borderRadius: 14, alignSelf: 'flex-end' }} />
+              </div>
             ) : messages.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: 40 }}>
                 {isGroupContact ? 'Nenhuma mensagem do grupo ainda.' : 'Nenhuma mensagem ainda. Envie a primeira!'}
@@ -874,7 +893,7 @@ export default function InboxView() {
                 }}>
                   {/* Sender avatar — only for inbound group messages */}
                   {isGroupContact && !isSent && (
-                    <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, overflow: 'hidden', background: '#1e1e30', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: senderColor, alignSelf: 'flex-end', marginBottom: 0 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, overflow: 'hidden', background: 'var(--field-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: senderColor, alignSelf: 'flex-end', marginBottom: 0 }}>
                       {senderPhoto
                         ? <img src={senderPhoto} alt={groupSender || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                         : senderInitial
@@ -884,23 +903,21 @@ export default function InboxView() {
 
                   <div style={{
                     padding: isMediaBubble ? '9px 11px' : '9px 14px',
-                    borderRadius: 14, fontSize: 13, lineHeight: 1.55,
+                    borderRadius: 16, fontSize: 13, lineHeight: 1.55,
                     background: isAuto
-                      ? 'rgba(34,197,94,0.07)'
+                      ? 'var(--green-dim)'
                       : isSent
-                        ? 'rgba(59,130,246,0.18)'
-                        : 'var(--bg-card)',
+                        ? 'var(--msg-out-bg)'
+                        : 'var(--msg-in-bg)',
                     border: `1px ${isAuto ? 'dashed' : 'solid'} ${
                       isAuto
                         ? 'rgba(34,197,94,0.28)'
-                        : isSent
-                          ? 'rgba(59,130,246,0.28)'
-                          : 'var(--border)'
+                        : 'var(--hairline)'
                     }`,
-                    borderBottomRightRadius: isSent ? 4 : 14,
-                    borderBottomLeftRadius: isSent ? 14 : 4,
+                    borderBottomRightRadius: isSent ? 4 : 16,
+                    borderBottomLeftRadius: isSent ? 16 : 4,
                     minWidth: 0, flex: '0 1 auto',
-                    boxShadow: isSent ? '0 2px 8px rgba(59,130,246,0.10)' : 'var(--shadow-xs)',
+                    boxShadow: isSent ? '0 2px 10px rgba(59,130,246,0.12), inset 0 1px 0 var(--highlight)' : 'var(--shadow-xs)',
                   }}>
                     {isAuto && <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Automacao</div>}
                     {/* Sender name inside bubble — only inbound group */}
@@ -918,8 +935,8 @@ export default function InboxView() {
             <div ref={msgEndRef} />
           </div>
 
-          {/* Fix 7: groups and individual contacts both get the send area */}
-          <div style={{ borderTop: '1px solid var(--border)', padding: '14px 20px', flexShrink: 0, position: 'relative' }}>
+          {/* Fix 7: groups and individual contacts both get the send area — barra flutuante de vidro */}
+          <div className="glass-nav anim" style={{ ['--i' as any]: 3, borderRadius: 999, padding: '8px 8px 8px 18px', flexShrink: 0, position: 'relative' }}>
               {/* Template picker popup */}
               <TemplateDropdown
                 visible={showTemplates}
@@ -936,26 +953,30 @@ export default function InboxView() {
                     if (e.key === 'Enter' && !e.shiftKey && !showTemplates) { e.preventDefault(); sendMessage(); }
                   }}
                   placeholder="Digite / para templates ou mensagem..." disabled={sending}
-                  style={{ flex: 1, padding: '10px 18px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 24, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.18s, box-shadow 0.18s' }}
-                  onFocus={e => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px var(--accent-dim)'; }}
-                  onBlur={e => { e.target.style.borderColor = 'var(--border)'; e.target.style.boxShadow = 'none'; }}
+                  style={{ flex: 1, padding: '8px 0', background: 'transparent', border: 'none', borderRadius: 0, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxShadow: 'none' }}
                 />
                 <button onClick={sendMessage} disabled={sending || !newMsg.trim() || showTemplates}
-                  style={{ width: 38, height: 38, borderRadius: '50%', border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: (sending || !newMsg.trim() || showTemplates) ? 0.45 : 1, transition: 'opacity 0.18s, box-shadow 0.18s', boxShadow: (!sending && newMsg.trim()) ? '0 4px 12px rgba(59,130,246,0.35)' : 'none' }}>
+                  style={{ width: 38, height: 38, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: (sending || !newMsg.trim() || showTemplates) ? 0.45 : 1, transition: 'opacity 0.18s var(--ease-out), box-shadow 0.2s var(--ease-out), transform 0.22s var(--ease-spring)', boxShadow: (!sending && newMsg.trim()) ? '0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)' : 'inset 0 1px 0 rgba(255,255,255,0.2)' }}
+                  onMouseEnter={e => { if (newMsg.trim()) e.currentTarget.style.transform = 'scale(1.08)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+                >
                   <svg style={{ width: 16, height: 16, stroke: '#fff', fill: 'none', strokeWidth: 2 }} viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
                 </button>
               </div>
             </div>
         </div>
       ) : !isMobile ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+        <div className="glass-panel anim" style={{ ['--i' as any]: 1, flex: 1, borderRadius: 'var(--radius-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--text-muted)', fontSize: 14 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 18, background: 'var(--field-bg)', border: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </div>
           {activeTab === 'grupos' ? 'Selecione um grupo para visualizar' : 'Selecione um contato para conversar'}
         </div>
       ) : null}
 
       {/* CRM Side Panel — hidden on mobile */}
       {activeContact && !isMobile && (
-        <div style={{ width: 300, borderLeft: '1px solid var(--border)', background: 'var(--bg-secondary)', flexShrink: 0, overflowY: 'auto', padding: '14px 18px' }}>
+        <div className="glass-panel anim" style={{ ['--i' as any]: 2, width: 300, borderRadius: 'var(--radius-lg)', flexShrink: 0, overflowY: 'auto', padding: '14px 18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Dados do Contato</div>
             <a href={`/contato/${activeContact.id}`} style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }}>Ver perfil</a>
@@ -975,7 +996,7 @@ export default function InboxView() {
                 onChange={e => setter(e.target.value)}
                 type={type}
                 placeholder={`${label}...`}
-                style={{ width: '100%', padding: '7px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                style={{ width: '100%', padding: '7px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
               />
             </div>
           ))}
@@ -987,14 +1008,14 @@ export default function InboxView() {
               onChange={e => setEditNotes(e.target.value)}
               placeholder="Notas sobre o contato..."
               rows={3}
-              style={{ width: '100%', padding: '7px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '7px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }}
             />
           </div>
 
           <button
             onClick={saveContact}
             disabled={savingContact}
-            style={{ width: '100%', padding: '8px 0', background: saveSuccess ? 'rgba(34,197,94,0.15)' : 'var(--accent)', color: saveSuccess ? '#4ade80' : '#fff', border: saveSuccess ? '1px solid rgba(34,197,94,0.3)' : 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: savingContact ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: savingContact ? 0.6 : 1, transition: 'all 0.2s' }}
+            style={{ width: '100%', padding: '8px 0', background: saveSuccess ? 'var(--green-dim)' : 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: saveSuccess ? 'var(--green)' : '#fff', border: saveSuccess ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(255,255,255,0.18)', boxShadow: saveSuccess ? 'none' : '0 3px 12px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)', borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: savingContact ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: savingContact ? 0.6 : 1, transition: 'all 0.22s var(--ease-out)' }}
           >
             {savingContact ? 'Salvando...' : saveSuccess ? 'Salvo!' : 'Salvar'}
           </button>

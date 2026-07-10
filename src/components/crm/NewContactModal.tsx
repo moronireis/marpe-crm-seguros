@@ -5,10 +5,11 @@ import { useState, useEffect } from 'react';
 // da tela "Cadastro de Clientes" do Corp. CEP consulta o ViaCEP.
 
 const INPUT_S: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', padding: '8px 10px',
-  background: 'var(--bg-card)', border: '1px solid var(--border)',
-  borderRadius: 8, color: 'var(--text-primary)', fontSize: 13,
+  width: '100%', boxSizing: 'border-box', padding: '8px 11px',
+  background: 'var(--field-bg)', border: '1px solid var(--hairline)',
+  borderRadius: 10, color: 'var(--text-primary)', fontSize: 13,
   fontFamily: 'inherit', outline: 'none',
+  transition: 'border-color 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out)',
 };
 const LABEL_S: React.CSSProperties = {
   display: 'block', fontSize: 11, color: 'var(--text-muted)',
@@ -112,24 +113,21 @@ export default function NewContactModal({ onClose, onCreated }: {
 
   return (
     <div
+      className="overlay-glass"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}
     >
-      <div style={{
-        background: 'var(--bg-secondary)', border: '1px solid var(--border)',
-        borderRadius: 14, width: 560, maxHeight: '90vh',
+      <div className="glass-modal modal-pop" style={{
+        borderRadius: 'var(--radius-xl)', width: 560, maxWidth: 'calc(100vw - 32px)', maxHeight: '90vh',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
       }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div>
-            <span style={{ fontSize: 15, fontWeight: 600 }}>Novo Cliente</span>
+            <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Novo Cliente</span>
             <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 10 }}>grava no Corp e no CRM</span>
           </div>
-          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontFamily: 'inherit' }}>✕</button>
+          <button onClick={onClose} aria-label="Fechar" style={{ width: 30, height: 30, borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit', transition: 'all 0.2s var(--ease-out)' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -234,10 +232,18 @@ export default function NewContactModal({ onClose, onCreated }: {
           )}
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
-            <button type="button" onClick={onClose} style={{ padding: '9px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button type="button" onClick={onClose} style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500, transition: 'all 0.2s var(--ease-out)' }}>
               Cancelar
             </button>
-            <button type="submit" disabled={submitting || !form.name.trim()} style={{ padding: '9px 18px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', opacity: (submitting || !form.name.trim()) ? 0.5 : 1 }}>
+            <button type="submit" disabled={submitting || !form.name.trim()} style={{
+              padding: '9px 18px', borderRadius: 10,
+              border: '1px solid rgba(255,255,255,0.18)',
+              background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)',
+              boxShadow: '0 3px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)',
+              color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              opacity: (submitting || !form.name.trim()) ? 0.5 : 1,
+              transition: 'all 0.22s var(--ease-out)',
+            }}>
               {submitting ? 'Gravando no Corp...' : 'Cadastrar Cliente'}
             </button>
           </div>

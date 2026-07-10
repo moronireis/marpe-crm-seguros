@@ -1,4 +1,5 @@
 ---
+import { ClientRouter } from 'astro:transitions';
 import '../styles/global.css';
 
 export const prerender = false;
@@ -37,10 +38,19 @@ const navItems = [
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title} | Marpe CRM</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <ClientRouter />
 </head>
 <body class="h-screen overflow-hidden flex">
+  <!-- Fundo ambiente -->
+  <div class="ambient" aria-hidden="true">
+    <div class="orb orb-a"></div>
+    <div class="orb orb-b"></div>
+    <div class="orb orb-c"></div>
+    <div class="grain"></div>
+  </div>
+
   <!-- Mobile hamburger button -->
-  <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Abrir menu">
+  <button id="sidebar-toggle" class="sidebar-toggle glass-nav" aria-label="Abrir menu">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
       <line x1="3" y1="6" x2="21" y2="6" />
       <line x1="3" y1="12" x2="21" y2="12" />
@@ -52,7 +62,7 @@ const navItems = [
   <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
   <!-- Sidebar -->
-  <nav id="sidebar" class="sidebar">
+  <nav id="sidebar" class="sidebar glass-nav">
     <a href="/dashboard" class="sidebar-logo" title="Marpe CRM">M</a>
 
     <div class="sidebar-nav">
@@ -72,7 +82,6 @@ const navItems = [
             {item.icon === 'link' && <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>}
             {item.icon === 'template' && <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>}
           </svg>
-          {activeSection === item.id && <span class="sidebar-indicator"></span>}
           {item.id === 'inbox' && <span class="nav-badge nav-badge--red" id="badge-inbox" aria-label="conversas não lidas"></span>}
           {item.id === 'crm'   && <span class="nav-badge nav-badge--amber" id="badge-crm" aria-label="ações pendentes"></span>}
         </a>
@@ -131,92 +140,85 @@ const navItems = [
 
 <style>
   .sidebar {
-    width: var(--sidebar-width);
-    background: var(--sidebar-bg);
-    border-right: 1px solid var(--border);
+    width: 62px;
+    margin: 12px 0 12px 12px;
+    border-radius: var(--radius-lg);
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 14px 0;
+    padding: 12px 0;
     flex-shrink: 0;
+    position: relative;
+    z-index: 40;
   }
   .sidebar-logo {
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
     border-radius: 12px;
     background: linear-gradient(145deg, #4F9BFF, #1D5EDB);
-    box-shadow: 0 4px 14px rgba(59,130,246,0.35), 0 0 0 1px rgba(255,255,255,0.10) inset;
+    box-shadow: 0 4px 16px var(--accent-glow), 0 0 0 1px rgba(255,255,255,0.12) inset;
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 700;
     font-size: 14px;
     color: #fff;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
     text-decoration: none;
     letter-spacing: -0.02em;
-    transition: transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out);
+    transition: transform 0.25s var(--ease-spring), box-shadow 0.25s var(--ease-out);
   }
   .sidebar-logo:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(59,130,246,0.45), 0 0 0 1px rgba(255,255,255,0.12) inset;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px var(--accent-glow), 0 0 0 1px rgba(255,255,255,0.16) inset;
   }
   .sidebar-nav {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: 3px;
     flex: 1;
   }
   .sidebar-item {
     width: 40px;
     height: 40px;
-    border-radius: 12px;
+    border-radius: 13px;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--text-muted);
     cursor: pointer;
-    transition: background 0.18s var(--ease), color 0.18s var(--ease), box-shadow 0.18s var(--ease);
+    transition: background 0.2s var(--ease), color 0.2s var(--ease),
+                border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
     position: relative;
     text-decoration: none;
-    border: none;
+    border: 1px solid transparent;
     background: transparent;
     padding: 0;
     font-family: inherit;
   }
   .sidebar-item:hover {
-    background: rgba(255,255,255,0.07);
+    background: var(--field-bg);
     color: var(--text-secondary);
   }
   .sidebar-item.active {
     background: var(--accent-dim);
     color: var(--accent-light);
-    box-shadow: 0 0 0 1px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.07);
+    border-color: var(--hairline);
+    box-shadow: 0 0 18px var(--accent-dim), inset 0 1px 0 var(--highlight);
   }
   .sidebar-icon {
-    width: 20px;
-    height: 20px;
+    width: 19px;
+    height: 19px;
     stroke: currentColor;
     fill: none;
     stroke-width: 1.75;
     stroke-linecap: round;
     stroke-linejoin: round;
-    transition: transform 0.18s var(--ease-spring);
+    transition: transform 0.25s var(--ease-spring);
   }
   .sidebar-item:hover .sidebar-icon {
-    transform: scale(1.08);
-  }
-  .sidebar-indicator {
-    position: absolute;
-    left: -12px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 20px;
-    border-radius: 0 3px 3px 0;
-    background: linear-gradient(180deg, var(--accent-light), var(--accent));
-    box-shadow: 0 0 8px var(--accent-glow);
+    transform: scale(1.1);
   }
   .sidebar-bottom {
     display: flex;
@@ -224,24 +226,24 @@ const navItems = [
     align-items: center;
     gap: 6px;
     margin-top: auto;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-subtle);
-    width: 100%;
+    padding-top: 10px;
+    border-top: 1px solid var(--hairline);
+    width: calc(100% - 20px);
   }
   .sidebar-avatar {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #1e2a48, #1a1a2e);
-    border: 1.5px solid var(--border-accent);
+    background: var(--accent-dim);
+    border: 1px solid var(--hairline-strong);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10.5px;
+    font-weight: 700;
     color: var(--accent-light);
     cursor: pointer;
-    transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease);
+    transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
   }
   .sidebar-avatar:hover {
     border-color: var(--accent);
@@ -262,12 +264,12 @@ const navItems = [
     width: 34px;
     height: 20px;
     border-radius: 10px;
-    background: rgba(255,255,255,0.08);
+    background: var(--field-bg);
     display: flex;
     align-items: center;
     padding: 3px;
     transition: background 0.25s var(--ease);
-    border: 1px solid rgba(255,255,255,0.10);
+    border: 1px solid var(--hairline-strong);
   }
   .theme-toggle__thumb {
     width: 14px;
@@ -278,7 +280,7 @@ const navItems = [
     align-items: center;
     justify-content: center;
     transform: translateX(0);
-    transition: transform 0.25s var(--ease-spring), background 0.25s var(--ease);
+    transition: transform 0.3s var(--ease-spring), background 0.25s var(--ease);
     flex-shrink: 0;
     box-shadow: 0 1px 3px rgba(0,0,0,0.4);
   }
@@ -287,14 +289,10 @@ const navItems = [
   .theme-icon--sun  { display: none;  color: #fbbf24; }
 
   /* Light mode state */
-  html.light .theme-toggle__track {
-    background: #dbeafe;
-    border-color: rgba(0,0,0,0.10);
-  }
   html.light .theme-toggle__thumb {
     background: var(--accent);
     transform: translateX(14px);
-    box-shadow: 0 1px 4px rgba(37,99,235,0.5);
+    box-shadow: 0 1px 4px var(--accent-glow);
   }
   html.light .theme-icon--moon { display: none;  }
   html.light .theme-icon--sun  { display: block; }
@@ -316,27 +314,17 @@ const navItems = [
     color: #fff;
     pointer-events: none;
     animation: badge-pop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-    border: 1.5px solid var(--sidebar-bg);
+    border: 1.5px solid rgba(0,0,0,0.35);
   }
-  .nav-badge--red   { background: var(--red); box-shadow: 0 2px 6px rgba(239,68,68,0.4); }
-  .nav-badge--amber { background: var(--amber); color: #000; box-shadow: 0 2px 6px rgba(245,158,11,0.35); }
+  html.light .nav-badge { border-color: rgba(255,255,255,0.8); }
+  .nav-badge--red   { background: var(--red); box-shadow: 0 2px 8px var(--red-dim); }
+  .nav-badge--amber { background: var(--amber); color: #000; box-shadow: 0 2px 8px var(--amber-dim); }
   .nav-badge.visible { display: block; }
 
   @keyframes badge-pop {
     from { transform: scale(0.5); opacity: 0; }
     to   { transform: scale(1);   opacity: 1; }
   }
-
-  /* ── Light mode sidebar override ─── */
-  html.light .sidebar {
-    background: #1e293b;
-    border-right-color: #334155;
-  }
-  html.light .sidebar-item { color: #94a3b8; }
-  html.light .sidebar-item:hover { background: rgba(255,255,255,0.10); color: #e2e8f0; }
-  html.light .sidebar-item.active { background: rgba(59,130,246,0.22); color: #93c5fd; }
-  html.light .sidebar-bottom { border-top-color: rgba(255,255,255,0.08); }
-  html.light .theme-toggle__track { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.12); }
 
   /* ── Mobile responsive ────────────────────────────────────────── */
   .sidebar-toggle {
@@ -347,25 +335,25 @@ const navItems = [
     z-index: 200;
     width: 38px;
     height: 38px;
-    border-radius: 10px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
+    border-radius: 12px;
     color: var(--text-secondary);
     align-items: center;
     justify-content: center;
     cursor: pointer;
     padding: 0;
-    box-shadow: var(--shadow-sm);
   }
   .sidebar-overlay {
     display: none;
     position: fixed;
     inset: 0;
     z-index: 99;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--scrim);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
   }
   .sidebar-overlay.active {
     display: block;
+    animation: fade-in 0.25s var(--ease-out) both;
   }
 
   @media (max-width: 768px) {
@@ -376,10 +364,11 @@ const navItems = [
       position: fixed;
       top: 0;
       left: 0;
-      height: 100%;
+      height: calc(100% - 20px);
+      margin: 10px;
       z-index: 100;
-      transform: translateX(-100%);
-      transition: transform 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+      transform: translateX(calc(-100% - 20px));
+      transition: transform 0.35s var(--ease-glass);
     }
     .sidebar.open {
       transform: translateX(0);
@@ -395,8 +384,8 @@ const navItems = [
   }
 </style>
 
-<script>
-  // ── Theme toggle (apply before paint to avoid flash) ──────────────────────
+<script is:inline>
+  // ── Theme (apply before paint to avoid flash) ─────────────────────────────
   (function() {
     const saved = localStorage.getItem('marpe-theme');
     if (saved === 'light') document.documentElement.classList.add('light');
@@ -404,45 +393,42 @@ const navItems = [
 </script>
 
 <script>
-  const toggle = document.getElementById('sidebar-toggle');
-  const sidebar = document.getElementById('sidebar');
-  const overlay = document.getElementById('sidebar-overlay');
+  // ── Init por página (roda no load inicial e após cada navegação) ──────────
+  function initSidebar() {
+    const toggle = document.getElementById('sidebar-toggle');
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
 
-  function openSidebar() {
-    sidebar?.classList.add('open');
-    overlay?.classList.add('active');
-  }
-
-  function closeSidebar() {
-    sidebar?.classList.remove('open');
-    overlay?.classList.remove('active');
-  }
-
-  toggle?.addEventListener('click', () => {
-    if (sidebar?.classList.contains('open')) {
-      closeSidebar();
-    } else {
-      openSidebar();
+    function closeSidebar() {
+      sidebar?.classList.remove('open');
+      overlay?.classList.remove('active');
     }
-  });
 
-  overlay?.addEventListener('click', closeSidebar);
-
-  // Close sidebar when a nav link is tapped on mobile
-  sidebar?.querySelectorAll('a[href]').forEach(link => {
-    link.addEventListener('click', () => {
-      if (window.innerWidth <= 768) closeSidebar();
+    toggle?.addEventListener('click', () => {
+      if (sidebar?.classList.contains('open')) {
+        closeSidebar();
+      } else {
+        sidebar?.classList.add('open');
+        overlay?.classList.add('active');
+      }
     });
-  });
+
+    overlay?.addEventListener('click', closeSidebar);
+
+    sidebar?.querySelectorAll('a[href]').forEach(link => {
+      link.addEventListener('click', () => {
+        if (window.innerWidth <= 768) closeSidebar();
+      });
+    });
+  }
+
+  document.addEventListener('astro:page-load', initSidebar);
 </script>
 
 <script>
   // ── Notification badges + tab title ───────────────────────────────────────
-  const BASE_TITLE = document.title.replace(/^\(\d+\)\s*/, '');
-
-  const badgeInbox = document.getElementById('badge-inbox') as HTMLElement | null;
-  const badgeCrm   = document.getElementById('badge-crm')   as HTMLElement | null;
-
+  // Elementos são re-consultados a cada tick: sobrevivem às trocas de página
+  // do ClientRouter (o DOM antigo é substituído a cada navegação).
   function setBadge(el: HTMLElement | null, count: number) {
     if (!el) return;
     if (count > 0) {
@@ -460,28 +446,33 @@ const navItems = [
       if (!res.ok) return;
       const data: { unreadConversations: number; pendingDeals: number } = await res.json();
 
-      setBadge(badgeInbox, data.unreadConversations);
-      setBadge(badgeCrm,   data.pendingDeals);
+      setBadge(document.getElementById('badge-inbox'), data.unreadConversations);
+      setBadge(document.getElementById('badge-crm'), data.pendingDeals);
 
-      // Update browser tab title
+      const baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
       document.title = data.unreadConversations > 0
-        ? `(${data.unreadConversations}) ${BASE_TITLE}`
-        : BASE_TITLE;
+        ? `(${data.unreadConversations}) ${baseTitle}`
+        : baseTitle;
     } catch {
       // Silently ignore network errors — badges simply stay as-is
     }
   }
 
-  // Initial fetch + poll every 30 s
-  fetchUnread();
-  setInterval(fetchUnread, 30_000);
+  document.addEventListener('astro:page-load', fetchUnread);
+  if (!(window as any).__marpeBadgeTimer) {
+    (window as any).__marpeBadgeTimer = setInterval(fetchUnread, 30_000);
+  }
 </script>
 
 <script>
-  // ── Theme toggle button ───────────────────────────────────────────────────
-  const themeBtn = document.getElementById('theme-toggle');
-  themeBtn?.addEventListener('click', () => {
-    const isLight = document.documentElement.classList.toggle('light');
-    localStorage.setItem('marpe-theme', isLight ? 'light' : 'dark');
-  });
+  // ── Theme toggle (delegação: sobrevive à troca de DOM do router) ──────────
+  if (!(window as any).__marpeThemeBound) {
+    (window as any).__marpeThemeBound = true;
+    document.addEventListener('click', (e) => {
+      const btn = (e.target as HTMLElement).closest('#theme-toggle');
+      if (!btn) return;
+      const isLight = document.documentElement.classList.toggle('light');
+      localStorage.setItem('marpe-theme', isLight ? 'light' : 'dark');
+    });
+  }
 </script>

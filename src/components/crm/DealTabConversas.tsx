@@ -124,17 +124,17 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>De</span>
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-              style={{ padding: '4px 6px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, outline: 'none', fontFamily: 'inherit' }} />
+              style={{ padding: '4px 6px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, outline: 'none', fontFamily: 'inherit' }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Até</span>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-              style={{ padding: '4px 6px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, outline: 'none', fontFamily: 'inherit' }} />
+              style={{ padding: '4px 6px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, outline: 'none', fontFamily: 'inherit' }} />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 120 }}>
             <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Buscar</span>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar nas mensagens..."
-              style={{ padding: '4px 6px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
+              style={{ padding: '4px 6px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, outline: 'none', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }} />
           </div>
         </div>
       )}
@@ -151,11 +151,12 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
         {msgs.map(m => (
           <div key={m.id} style={{ alignSelf: m.direction === 'outbound' ? 'flex-end' : 'flex-start', maxWidth: '80%' }}>
             <div style={{
-              padding: '8px 12px', borderRadius: 10,
-              background: m.direction === 'outbound' ? 'var(--accent-dim)' : 'var(--bg-card)',
-              border: `1px solid ${m.direction === 'outbound' ? 'rgba(59,130,246,0.2)' : 'var(--border)'}`,
-              borderBottomRightRadius: m.direction === 'outbound' ? 4 : 10,
-              borderBottomLeftRadius: m.direction === 'inbound' ? 4 : 10,
+              padding: '8px 12px', borderRadius: 14,
+              background: m.direction === 'outbound' ? 'var(--msg-out-bg)' : 'var(--msg-in-bg)',
+              border: '1px solid var(--hairline)',
+              boxShadow: 'var(--shadow-xs)',
+              borderBottomRightRadius: m.direction === 'outbound' ? 4 : 14,
+              borderBottomLeftRadius: m.direction === 'inbound' ? 4 : 14,
             }}>
               {m.content_type === 'image' && m.media_url && (
                 <img src={m.media_url} alt="" style={{ maxWidth: '100%', borderRadius: 6, marginBottom: m.body ? 6 : 0 }} loading="lazy" />
@@ -198,12 +199,12 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
               if (e.key === 'Enter' && !e.shiftKey && !pickerOpen) { e.preventDefault(); handleSend(); }
             }}
             placeholder="Digite / para templates ou mensagem..."
-            style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit' }}
+            style={{ flex: 1, padding: '8px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit' }}
           />
           <button
             onClick={handleSend}
             disabled={sending || !text.trim() || pickerOpen}
-            style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', opacity: (sending || pickerOpen) ? 0.6 : 1 }}
+            style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', boxShadow: '0 2px 10px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: (sending || pickerOpen) ? 0.6 : 1, transition: 'all 0.2s var(--ease-out)' }}
           >
             Enviar
           </button>

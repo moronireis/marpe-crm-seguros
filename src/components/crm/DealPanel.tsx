@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import DealTabInfo from './DealTabInfo';
 import DealTabConversas from './DealTabConversas';
 import DealTabAtividades from './DealTabAtividades';
@@ -73,6 +74,10 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
   // Users map for activity tab
   const [usersMap, setUsersMap] = useState<Record<string, string>>({});
 
+  // Indicador deslizante das abas
+  const tabRefs = useRef<Partial<Record<TabKey, HTMLButtonElement | null>>>({});
+  const [ink, setInk] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
+
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
     setIsMobile(mq.matches);
@@ -80,6 +85,11 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  useLayoutEffect(() => {
+    const el = tabRefs.current[activeTab];
+    if (el) setInk({ left: el.offsetLeft, width: el.offsetWidth });
+  }, [activeTab, loading, deal]);
 
   function load() {
     setLoading(true);
@@ -163,31 +173,38 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
     });
   }
 
+  const panelClass = isMobile ? 'glass-modal panel-in' : 'glass-nav panel-in';
   const styles: Record<string, React.CSSProperties> = {
     panel: isMobile
-      ? { position: 'fixed', inset: 0, zIndex: 150, background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', overflowY: 'auto' }
-      : { width: 420, borderLeft: '1px solid var(--border)', background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', flexShrink: 0, height: '100%', boxShadow: 'var(--shadow-lg)' },
-    header: { padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-card)' },
-    closeBtn: { width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, transition: 'background 0.15s, color 0.15s' },
+      ? { position: 'fixed', inset: 0, zIndex: 150, display: 'flex', flexDirection: 'column', overflowY: 'auto', border: 'none', borderRadius: 0 }
+      : { width: 420, margin: '12px 16px 16px 4px', borderRadius: 'var(--radius-xl)', display: 'flex', flexDirection: 'column', flexShrink: 0, height: 'calc(100% - 28px)', boxShadow: 'var(--shadow-panel), inset 0 1px 0 var(--highlight)', overflow: 'hidden' },
+    header: { padding: '16px 18px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 },
+    closeBtn: { width: 30, height: 30, borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s var(--ease-out)', flexShrink: 0 },
   };
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
-    padding: '8px 10px', fontSize: 11, fontWeight: active ? 600 : 500,
+    padding: '9px 10px', fontSize: 11, fontWeight: active ? 700 : 500,
     cursor: 'pointer', color: active ? 'var(--accent-light)' : 'var(--text-muted)',
     background: 'none', border: 'none',
-    borderBottom: `2px solid ${active ? 'var(--accent-light)' : 'transparent'}`,
-    fontFamily: 'inherit', transition: 'color 0.15s, border-color 0.15s',
+    fontFamily: 'inherit', transition: 'color 0.2s var(--ease-out)',
     whiteSpace: 'nowrap',
   });
 
   if (loading) return (
-    <div style={styles.panel}>
-      <div style={{ padding: 24, color: 'var(--text-muted)', fontSize: 13 }}>Carregando...</div>
+    <div className={panelClass} style={styles.panel}>
+      <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="skeleton" style={{ height: 18, width: '60%' }} />
+        <div className="skeleton" style={{ height: 12, width: '40%' }} />
+        <div className="skeleton" style={{ height: 34, width: '100%', marginTop: 8 }} />
+        <div className="skeleton" style={{ height: 12, width: '85%', marginTop: 10 }} />
+        <div className="skeleton" style={{ height: 12, width: '70%' }} />
+        <div className="skeleton" style={{ height: 12, width: '78%' }} />
+      </div>
     </div>
   );
 
   if (!deal) return (
-    <div style={styles.panel}>
+    <div className={panelClass} style={styles.panel}>
       <div style={{ padding: 24, color: 'var(--text-muted)', fontSize: 13 }}>Negocio nao encontrado</div>
     </div>
   );
@@ -196,42 +213,44 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
   const isConversaTab = activeTab === 'conversas';
 
   return (
-    <div style={styles.panel}>
-      {/* Loss Reason Modal */}
-      {pendingStageId && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, width: 360, maxWidth: 'calc(100vw - 32px)' }}>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Motivo da perda</div>
+    <div className={panelClass} style={styles.panel}>
+      {/* Loss Reason Modal — portal: o painel tem backdrop-filter + overflow hidden,
+          que criariam containing block / clipariam um position:fixed interno */}
+      {pendingStageId && createPortal(
+        <div className="overlay-glass">
+          <div className="glass-modal modal-pop" style={{ borderRadius: 'var(--radius-xl)', padding: 24, width: 360, maxWidth: 'calc(100vw - 32px)' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, letterSpacing: '-0.01em' }}>Motivo da perda</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>Selecione o motivo para mover este negocio para Perdido.</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
               {LOSS_REASONS.map(reason => (
-                <label key={reason} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '8px 10px', borderRadius: 8, background: lossReason === reason ? 'var(--accent-dim)' : 'var(--bg-card)', border: `1px solid ${lossReason === reason ? 'rgba(59,130,246,0.3)' : 'var(--border)'}` }}>
+                <label key={reason} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '8px 10px', borderRadius: 10, background: lossReason === reason ? 'var(--accent-dim)' : 'var(--field-bg)', border: `1px solid ${lossReason === reason ? 'rgba(59,130,246,0.3)' : 'var(--hairline)'}`, transition: 'all 0.18s var(--ease-out)' }}>
                   <input type="radio" name="loss_reason" value={reason} checked={lossReason === reason} onChange={() => setLossReason(reason)} style={{ accentColor: 'var(--accent)', margin: 0 }} />
                   <span style={{ fontSize: 13 }}>{reason}</span>
                 </label>
               ))}
             </div>
             {lossReason === 'Outro' && (
-              <input value={lossReasonOther} onChange={e => setLossReasonOther(e.target.value)} placeholder="Descreva o motivo..." style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', marginBottom: 16, boxSizing: 'border-box' }} />
+              <input value={lossReasonOther} onChange={e => setLossReasonOther(e.target.value)} placeholder="Descreva o motivo..." style={{ width: '100%', padding: '8px 11px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 10, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', marginBottom: 16, boxSizing: 'border-box' }} />
             )}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setPendingStageId(null)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Cancelar</button>
-              <button onClick={confirmLoss} disabled={saving} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#ef4444', color: '#fff', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>{saving ? 'Salvando...' : 'Confirmar'}</button>
+              <button onClick={() => setPendingStageId(null)} style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s var(--ease-out)' }}>Cancelar</button>
+              <button onClick={confirmLoss} disabled={saving} style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.14)', background: 'linear-gradient(180deg, #f0524f, #d63b38)', boxShadow: '0 3px 14px var(--red-dim), inset 0 1px 0 rgba(255,255,255,0.2)', color: '#fff', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, transition: 'all 0.2s var(--ease-out)' }}>{saving ? 'Salvando...' : 'Confirmar'}</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Header */}
       <div style={styles.header}>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           {contact?.id ? (
-            <a href={`/contato/${contact.id}`} style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', textDecoration: 'none', display: 'block' }}
+            <a href={`/contato/${contact.id}`} style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-primary)', textDecoration: 'none', display: 'block', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', transition: 'color 0.2s var(--ease-out)' }}
               onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent-light)')}
               onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-primary)')}
             >{contact.name}</a>
           ) : (
-            <div style={{ fontSize: 14, fontWeight: 600 }}>{deal.title || '—'}</div>
+            <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: '-0.01em' }}>{deal.title || '—'}</div>
           )}
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
             {deal.marpe_funnels?.name} · {deal.marpe_funnel_stages?.name}
@@ -239,41 +258,56 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
         </div>
         {contact?.id && contact?.phone && (
           <a href={`/inbox?contact=${contact.id}`} title="Abrir conversa no inbox"
-            style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', marginRight: 4 }}
+            style={{ width: 30, height: 30, borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', marginRight: 2, transition: 'all 0.2s var(--ease-out)', flexShrink: 0 }}
             onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent-light)'; (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(59,130,246,0.4)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-muted)'; (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)'; (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--hairline)'; }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </a>
         )}
-        <button style={styles.closeBtn} onClick={onClose}>✕</button>
+        <button style={styles.closeBtn} onClick={onClose} aria-label="Fechar painel">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
 
       {/* Stage selector */}
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Etapa</div>
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--hairline)' }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6, fontWeight: 600 }}>Etapa</div>
         <select value={deal.stage_id} onChange={e => handleStageChange(e.target.value)} disabled={saving}
-          style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', cursor: 'pointer' }}
+          style={{ width: '100%', padding: '8px 11px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 10, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', cursor: 'pointer', transition: 'border-color 0.2s var(--ease-out)' }}
         >
           {stages.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
         </select>
         {saving && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Salvando...</div>}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0, overflowX: 'auto' }}>
+      {/* Tabs com indicador deslizante */}
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--hairline)', flexShrink: 0, overflowX: 'auto', position: 'relative' }}>
         {TABS.map(tab => (
-          <button key={tab.key} style={tabStyle(activeTab === tab.key)} onClick={() => setActiveTab(tab.key)}>
+          <button
+            key={tab.key}
+            ref={el => { tabRefs.current[tab.key] = el; }}
+            style={tabStyle(activeTab === tab.key)}
+            onClick={() => setActiveTab(tab.key)}
+          >
             {tab.label}
             {tab.key === 'atividades' && deal.marpe_deal_activities?.length ? ` (${deal.marpe_deal_activities.length})` : ''}
           </button>
         ))}
+        <span aria-hidden="true" style={{
+          position: 'absolute', bottom: 0, height: 2,
+          left: ink.left, width: ink.width,
+          background: 'linear-gradient(90deg, var(--accent), var(--accent-light))',
+          borderRadius: '2px 2px 0 0',
+          boxShadow: '0 0 10px var(--accent-glow)',
+          transition: 'left 0.32s var(--ease-glass), width 0.32s var(--ease-glass)',
+        }} />
       </div>
 
-      {/* Tab content */}
-      <div style={{ flex: 1, overflowY: isConversaTab ? 'hidden' : 'auto', padding: isConversaTab ? 0 : '12px 16px', display: 'flex', flexDirection: 'column' }}>
+      {/* Tab content (crossfade na troca de aba) */}
+      <div key={activeTab} className="fade-in" style={{ flex: 1, overflowY: isConversaTab ? 'hidden' : 'auto', padding: isConversaTab ? 0 : '12px 16px', display: 'flex', flexDirection: 'column' }}>
         {activeTab === 'info' && (
           <DealTabInfo deal={deal} onSave={handleInfoSave} />
         )}

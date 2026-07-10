@@ -53,7 +53,7 @@ export default function DealTabAnotacoes({ dealId }: Props) {
           rows={3}
           style={{
             width: '100%', boxSizing: 'border-box', padding: '8px 10px',
-            background: 'var(--bg-card)', border: '1px solid var(--border)',
+            background: 'var(--field-bg)', border: '1px solid var(--hairline)',
             borderRadius: 8, color: 'var(--text-primary)', fontSize: 12,
             fontFamily: 'inherit', outline: 'none', resize: 'vertical', minHeight: 60,
           }}

@@ -46,9 +46,9 @@ const s = {
   row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', minHeight: 28, gap: 8 } as React.CSSProperties,
   label: { fontSize: 11, color: 'var(--text-muted)', flexShrink: 0, minWidth: 100 } as React.CSSProperties,
   value: { fontSize: 12, color: 'var(--text-primary)', fontWeight: 500, textAlign: 'right' as const, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const } as React.CSSProperties,
-  input: { width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' } as React.CSSProperties,
-  select: { width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', cursor: 'pointer' } as React.CSSProperties,
-  textarea: { width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' as const, minHeight: 60 } as React.CSSProperties,
+  input: { width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none' } as React.CSSProperties,
+  select: { width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', cursor: 'pointer' } as React.CSSProperties,
+  textarea: { width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit', outline: 'none', resize: 'vertical' as const, minHeight: 60 } as React.CSSProperties,
   saveBtn: { padding: '6px 14px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 } as React.CSSProperties,
   checkbox: { accentColor: 'var(--accent)', margin: 0 } as React.CSSProperties,
 };

@@ -18,7 +18,7 @@ npx vercel deploy --prod  # Deploy to production
 |-----------|--------|-------|
 | Framework | Astro 6 SSR | Server-side rendering on Vercel |
 | UI | React 19 | Islands architecture (client:load) |
-| Styling | Inline styles | Dark theme, CSS custom properties in global.css |
+| Styling | Inline styles + utility classes | Liquid Glass design system v2: tokens (dark+light) e classes de material (`.glass-nav`, `.glass-panel`, `.glass-modal`, `.card-surface`, `.anim`, `.skeleton`, `.overlay-glass`) em `global.css`; layout continua inline. View Transitions via ClientRouter no AppLayout. Ver PLANO-UX-LIQUID-GLASS.md |
 | Database | Supabase (PostgreSQL) | Cloudfy-hosted, 22 tables prefixed `marpe_` |
 | Auth | Supabase Auth | Email/password, cookie sessions (24h access, 30d refresh) |
 | WhatsApp | UazapiGO | Bridge at u4digital.uazapi.com |
@@ -190,7 +190,7 @@ More endpoints in the official doc, not yet consumed by the CRM (useful for Fase
 
 ## Key Design Decisions
 
-1. **Dark theme only** — no light mode, no toggle. CSS vars in global.css.
+1. **Dark theme default + light mode** — toggle no sidebar, tokens dark/light em global.css (Liquid Glass v2, 2026-07-10).
 2. **Inline styles** — no Tailwind, no CSS modules. All styles are React inline objects.
 3. **Corp is irreplaceable** — the CRM complements Corp, never replaces. Portal integrations with insurers are Corp's domain.
 4. **WhatsApp via bridge** — UazapiGO wraps WhatsApp Web. Not Meta Cloud API (Marcel rejected API templates/approval flow).
