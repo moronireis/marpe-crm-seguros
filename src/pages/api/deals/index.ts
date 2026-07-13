@@ -82,6 +82,9 @@ export const POST: APIRoute = async ({ locals, request }) => {
           per_r: body.pct_repasse ? Number(body.pct_repasse) : 0,
           produto_ja_possui: body.ja_possui_produto ? 'T' : 'F',
           ...(body.base_calculo_repasse ? { campo_base_r: Number(body.base_calculo_repasse) } : {}),
+          // Campanha só existe como código na CorpAPI (nome não é exposto) —
+          // o codcamp faz o round-trip e o Corp resolve o rótulo na UI dele
+          ...(body.corp_codcamp ? { codcamp: Number(body.corp_codcamp) } : {}),
         });
         // Mesmo formato do sync (neg_{codfil}_{codigo}) — senão o próximo sync
         // não reconhece o vínculo e cria um deal duplicado no CRM.

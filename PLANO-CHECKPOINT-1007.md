@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-13
 Fonte: `Downloads/Checkpoint (Marpe) - 1007 - Novos Ajustes.pdf` (Tiago Donicht — u4digital, 12 itens)
-Status: item 2 RESOLVIDO em prod (hotfix 13/07, commit befe08b); demais aguardando aprovação do plano
+Status: item 2 RESOLVIDO em prod (hotfix 13/07, befe08b) · Sprint A IMPLEMENTADO (13/07, commit d00e2a7) — preview na Vercel aguardando aprovação para prod · Sprints B-D pendentes
 
 ---
 

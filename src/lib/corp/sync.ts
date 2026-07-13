@@ -217,6 +217,9 @@ function negocioDetailFields(det: CorpNegocioDetail): Record<string, any> {
     observacoes_proposta: det.observacoes || null,
     pct_repasse: det.per_r || null,
     valor_repasse: det.val_r || null,
+    // Código da base de cálculo do repasse (campo_base_r) — a CorpAPI não expõe
+    // o rótulo, só o código; ele alimenta o dropdown e volta no dual-write
+    base_calculo_repasse: det.campo_base_r ?? null,
     detalhes_corp: {
       status: det.status,
       etapa: det.etapa,

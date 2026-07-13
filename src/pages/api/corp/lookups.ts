@@ -22,13 +22,18 @@ export const GET: APIRoute = async ({ locals }) => {
   }
 
   const sb = createServerClient();
-  const [ramos, seguradoras, produtores, agentes, profissoes, campanhasQ] = await Promise.allSettled([
+  const [ramos, seguradoras, produtores, agentes, profissoes, campanhasQ, codcampQ, baseQ] = await Promise.allSettled([
     listRamos(),
     listSeguradoras(),
     listProdutores(),
     listAgentes(),
     listProfissoes(),
     sb.from('marpe_deals').select('campanha').not('campanha', 'is', null).limit(2000),
+    // A CorpAPI não expõe /campanhas nem o NOME no detail (só codcamp) — os
+    // códigos vêm dos negócios sincronizados; o dual-write devolve o codcamp
+    // e o Corp resolve o rótulo na interface dele.
+    sb.from('marpe_deals').select('codcamp:detalhes_corp->>codcamp').not('detalhes_corp->>codcamp', 'is', null).limit(2000),
+    sb.from('marpe_deals').select('base:detalhes_corp->>campo_base_repasse').not('detalhes_corp->>campo_base_repasse', 'is', null).limit(2000),
   ]);
 
   const ok = <T,>(r: PromiseSettledResult<T>, fallback: T): T =>
@@ -37,6 +42,14 @@ export const GET: APIRoute = async ({ locals }) => {
   const campanhaRows = (ok(campanhasQ, { data: [] } as any) as any)?.data || [];
   const campanhas = [...new Set(campanhaRows.map((d: any) => d.campanha).filter(Boolean))].sort() as string[];
 
+  const codcampRows = (ok(codcampQ, { data: [] } as any) as any)?.data || [];
+  const campanhas_cod = [...new Set(codcampRows.map((d: any) => parseInt(d.codcamp)).filter((n: number) => !isNaN(n)))].sort((a: number, b: number) => a - b) as number[];
+
+  const baseRows = (ok(baseQ, { data: [] } as any) as any)?.data || [];
+  const basesFound = [...new Set(baseRows.map((d: any) => parseInt(d.base)).filter((n: number) => !isNaN(n)))] as number[];
+  // 5 é o default validado no POST /negocio — garante pelo menos uma opção
+  const bases_repasse = [...new Set([5, ...basesFound])].sort((a, b) => a - b);
+
   const body = JSON.stringify({
     ramos: ok(ramos, [] as Awaited<ReturnType<typeof listRamos>>),
     seguradoras: ok(seguradoras, [] as Awaited<ReturnType<typeof listSeguradoras>>),
@@ -44,6 +57,8 @@ export const GET: APIRoute = async ({ locals }) => {
     agentes: ok(agentes, [] as Awaited<ReturnType<typeof listAgentes>>),
     profissoes: ok(profissoes, [] as Awaited<ReturnType<typeof listProfissoes>>),
     campanhas,
+    campanhas_cod,
+    bases_repasse,
     tipos: [
       { codigo: 1, nome: 'Prospecção', deal_type: 'prospeccao' },
       { codigo: 2, nome: 'Renovação', deal_type: 'renovacao' },

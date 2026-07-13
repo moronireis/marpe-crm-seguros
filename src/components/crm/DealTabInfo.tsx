@@ -20,6 +20,16 @@ interface Props {
   onSave: (updates: Record<string, unknown>) => Promise<void>;
 }
 
+// Pick-lists do Corp para a edição (checkpoint 10/07, item 6)
+interface InfoLookups {
+  seguradoras: { codigo: number; nome: string }[];
+  produtores: { codigo: number; nome: string }[];
+  agentes: { codigo: number; nome: string }[];
+  campanhas: string[];
+  campanhas_cod?: number[];
+  bases_repasse?: number[];
+}
+
 function fmt(v: number | null | undefined) {
   if (!v && v !== 0) return '';
   return Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
@@ -57,6 +67,32 @@ export default function DealTabInfo({ deal, onSave }: Props) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({});
+  const [lookups, setLookups] = useState<InfoLookups | null>(null);
+
+  // Pick-lists do Corp ao entrar no modo edição (endpoint cacheia 10 min)
+  useEffect(() => {
+    if (!editing || lookups) return;
+    fetch('/api/corp/lookups')
+      .then(r => r.json())
+      .then(d => setLookups(d))
+      .catch(() => {});
+  }, [editing, lookups]);
+
+  // Select que degrada para o valor atual quando a lista Corp não carregou
+  function corpSelect(key: string, options: { nome: string }[] | undefined, placeholder: string) {
+    const current = String(form[key] ?? '');
+    if (!options?.length) {
+      return <input value={current} onChange={field(key)} placeholder={placeholder} style={s.input} />;
+    }
+    const inList = options.some(o => o.nome === current);
+    return (
+      <select value={current} onChange={field(key)} style={s.select}>
+        <option value="">— Selecione —</option>
+        {current && !inList && <option value={current}>{current} (atual)</option>}
+        {options.map(o => <option key={o.nome} value={o.nome}>{o.nome}</option>)}
+      </select>
+    );
+  }
 
   useEffect(() => {
     setForm({
@@ -165,7 +201,7 @@ export default function DealTabInfo({ deal, onSave }: Props) {
           <div style={s.row}><span style={s.label}>Prêmio</span><span style={s.value}>{deal.premio ? `R$ ${fmt(deal.premio)}` : '—'}</span></div>
           <div style={s.row}><span style={s.label}>% Comissão</span><span style={s.value}>{deal.comissao_pct ? `${deal.comissao_pct}%` : '—'}</span></div>
           <div style={s.row}><span style={s.label}>Vr. Comissão</span><span style={s.value}>{deal.comissao_valor ? `R$ ${fmt(deal.comissao_valor)}` : '—'}</span></div>
-          {deal.base_calculo_repasse && <div style={s.row}><span style={s.label}>Base Repasse</span><span style={s.value}>R$ {fmt(deal.base_calculo_repasse)}</span></div>}
+          {deal.base_calculo_repasse != null && <div style={s.row}><span style={s.label}>Base de Cálc. Repasse</span><span style={s.value}>{deal.base_calculo_repasse === 5 ? 'Com. Corretora' : `Código ${deal.base_calculo_repasse}`}</span></div>}
           {deal.pct_repasse && <div style={s.row}><span style={s.label}>% Repasse</span><span style={s.value}>{deal.pct_repasse}%</span></div>}
           {deal.valor_repasse && <div style={s.row}><span style={s.label}>Vr. Repasse</span><span style={s.value}>R$ {fmt(deal.valor_repasse)}</span></div>}
         </div>
@@ -233,7 +269,7 @@ export default function DealTabInfo({ deal, onSave }: Props) {
         </div>
         <div style={{ marginTop: 8 }}>
           <label style={s.label}>Seguradora</label>
-          <input value={form.seguradora} onChange={field('seguradora')} placeholder="Ex: Porto Seguro" style={s.input} />
+          {corpSelect('seguradora', lookups?.seguradoras, 'Ex: Porto Seguro')}
         </div>
         <div style={{ marginTop: 8 }}>
           <label style={s.label}>Apólice</label>
@@ -241,7 +277,11 @@ export default function DealTabInfo({ deal, onSave }: Props) {
         </div>
         <div style={{ marginTop: 8 }}>
           <label style={s.label}>Campanha</label>
-          <input value={form.campanha} onChange={field('campanha')} placeholder="Campanha (opcional)" style={s.input} />
+          <input list="info-campanhas" value={form.campanha} onChange={field('campanha')} placeholder="Campanha (opcional)" style={s.input} />
+          <datalist id="info-campanhas">
+            {(lookups?.campanhas || []).map(c => <option key={`n${c}`} value={c} />)}
+            {(lookups?.campanhas_cod || []).map(c => <option key={`c${c}`} value={`Campanha ${c}`} />)}
+          </datalist>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
           <div>
@@ -309,8 +349,13 @@ export default function DealTabInfo({ deal, onSave }: Props) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 8 }}>
           <div>
-            <label style={s.label}>Base Repasse</label>
-            <input type="number" min="0" step="0.01" value={form.base_calculo_repasse} onChange={field('base_calculo_repasse')} style={s.input} />
+            <label style={s.label}>Base de Cálc. Repasse</label>
+            <select value={String(form.base_calculo_repasse ?? '')} onChange={field('base_calculo_repasse')} style={s.select}>
+              <option value="">—</option>
+              {[...new Set([...(lookups?.bases_repasse || [5]), ...(form.base_calculo_repasse ? [Number(form.base_calculo_repasse)] : [])])].sort((a, b) => a - b).map(b => (
+                <option key={b} value={String(b)}>{b === 5 ? 'Com. Corretora (padrão)' : `Código ${b}`}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label style={s.label}>% Repasse</label>
@@ -329,11 +374,11 @@ export default function DealTabInfo({ deal, onSave }: Props) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <div>
             <label style={s.label}>Produtor</label>
-            <input value={form.produtor} onChange={field('produtor')} style={s.input} />
+            {corpSelect('produtor', lookups?.produtores, 'Nome do produtor')}
           </div>
           <div>
             <label style={s.label}>Agente</label>
-            <input value={form.agente} onChange={field('agente')} style={s.input} />
+            {corpSelect('agente', lookups?.agentes, 'Nome do agente')}
           </div>
         </div>
       </div>

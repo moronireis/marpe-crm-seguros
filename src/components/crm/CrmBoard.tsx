@@ -163,6 +163,7 @@ interface NewDealForm {
   campanha: string; ja_possui_produto: boolean;
   seguradora_atual: string; vigencia_atual_fim: string; corretora_atual: string;
   agente: string; produtor: string; observacoes_proposta: string;
+  base_calculo_repasse: string;
 }
 const EMPTY_FORM: NewDealForm = {
   contact_id: '', ramo: '', seguradora: '', deal_type: 'prospeccao',
@@ -171,6 +172,7 @@ const EMPTY_FORM: NewDealForm = {
   campanha: '', ja_possui_produto: false,
   seguradora_atual: '', vigencia_atual_fim: '', corretora_atual: '',
   agente: '', produtor: '', observacoes_proposta: '',
+  base_calculo_repasse: '5',
 };
 
 // Pick-lists integradas ao Corp (GET /api/corp/lookups). Fallback: listas fixas
@@ -181,6 +183,10 @@ interface CorpLookups {
   produtores: { codigo: number; nome: string }[];
   agentes: { codigo: number; nome: string }[];
   campanhas: string[];
+  /** Códigos de campanha vistos nos negócios sincronizados — a CorpAPI não expõe os nomes */
+  campanhas_cod?: number[];
+  /** Códigos de base de cálculo do repasse (campo_base_r) — 5 é o default do Corp */
+  bases_repasse?: number[];
   tipos: { codigo: number; nome: string; deal_type: string }[];
 }
 const FALLBACK_RAMOS = ['auto', 'vida', 'residencial', 'empresarial', 'equipamento', 'consorcio', 'financiamento', 'rcge'];
@@ -438,6 +444,8 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [lookups, setLookups] = useState<CorpLookups | null>(null);
+  // Campanha: '' | 'nome:X' | 'cod:16' | '__livre' (texto em form.campanha)
+  const [campanhaChoice, setCampanhaChoice] = useState('');
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -510,6 +518,17 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
     const corpRamo = lookups?.ramos.find(r => r.nome.toLowerCase() === form.ramo);
     const corpCia = lookups?.seguradoras.find(s => s.nome === form.seguradora);
     const corpTipo = lookups?.tipos.find(t => t.deal_type === form.deal_type);
+    // Campanha: código round-tripa para o Corp; texto livre fica só no CRM
+    let campanhaLabel: string | null = null;
+    let corpCodcamp: number | null = null;
+    if (campanhaChoice.startsWith('cod:')) {
+      corpCodcamp = parseInt(campanhaChoice.slice(4));
+      campanhaLabel = `Campanha ${corpCodcamp}`;
+    } else if (campanhaChoice.startsWith('nome:')) {
+      campanhaLabel = campanhaChoice.slice(5);
+    } else if (campanhaChoice === '__livre') {
+      campanhaLabel = form.campanha.trim() || null;
+    }
     const res = await fetch('/api/deals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -527,7 +546,9 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
         placa: form.placa || null,
         next_action: form.next_action || null,
         next_action_date: form.next_action_date || null,
-        campanha: form.campanha || null,
+        campanha: campanhaLabel,
+        corp_codcamp: corpCodcamp,
+        base_calculo_repasse: form.base_calculo_repasse ? parseInt(form.base_calculo_repasse) : null,
         ja_possui_produto: form.ja_possui_produto,
         seguradora_atual: form.seguradora_atual || null,
         vigencia_atual_fim: form.vigencia_atual_fim || null,
@@ -643,7 +664,7 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
             )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
               <label style={LABEL_S}>Prêmio (R$)</label>
               <input type="number" min="0" step="0.01" value={form.premio} onChange={field('premio')} placeholder="0,00" style={INPUT_S} />
@@ -655,6 +676,15 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
             <div>
               <label style={LABEL_S}>Repasse %</label>
               <input type="number" min="0" max="100" step="0.1" value={form.pct_repasse} onChange={field('pct_repasse')} placeholder="0,0" style={INPUT_S} />
+            </div>
+            <div>
+              <label style={LABEL_S}>Base de Cálc. Repasse</label>
+              <select value={form.base_calculo_repasse} onChange={field('base_calculo_repasse')} style={{ ...INPUT_S, cursor: 'pointer' }}>
+                <option value="">—</option>
+                {(lookups?.bases_repasse || [5]).map(b => (
+                  <option key={b} value={String(b)}>{b === 5 ? 'Com. Corretora (padrão)' : `Código ${b}`}</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -673,10 +703,15 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div>
               <label style={LABEL_S}>Campanha</label>
-              <input list="corp-campanhas" value={form.campanha} onChange={field('campanha')} placeholder="Opcional" style={INPUT_S} />
-              <datalist id="corp-campanhas">
-                {(lookups?.campanhas || []).map(c => <option key={c} value={c} />)}
-              </datalist>
+              <select value={campanhaChoice} onChange={e => setCampanhaChoice(e.target.value)} style={{ ...INPUT_S, cursor: 'pointer' }}>
+                <option value="">—</option>
+                {(lookups?.campanhas || []).map(c => <option key={`n${c}`} value={`nome:${c}`}>{c}</option>)}
+                {(lookups?.campanhas_cod || []).map(c => <option key={`c${c}`} value={`cod:${c}`}>Campanha {c} (Corp)</option>)}
+                <option value="__livre">Outra (digitar)...</option>
+              </select>
+              {campanhaChoice === '__livre' && (
+                <input value={form.campanha} onChange={field('campanha')} placeholder="Nome da campanha" autoFocus style={{ ...INPUT_S, marginTop: 6 }} />
+              )}
             </div>
             <div>
               <label style={LABEL_S}>Produtor</label>
