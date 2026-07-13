@@ -385,10 +385,15 @@ const navItems = [
 </style>
 
 <script is:inline>
-  // ── Theme (apply before paint to avoid flash) ─────────────────────────────
+  // ── Theme (apply before paint + re-apply after swaps) ─────────────────────
+  // O ClientRouter substitui o <html> a cada navegação, derrubando a classe
+  // .light — astro:after-swap reaplica a preferência salva (padrão Astro).
   (function() {
-    const saved = localStorage.getItem('marpe-theme');
-    if (saved === 'light') document.documentElement.classList.add('light');
+    function applyTheme() {
+      document.documentElement.classList.toggle('light', localStorage.getItem('marpe-theme') === 'light');
+    }
+    applyTheme();
+    document.addEventListener('astro:after-swap', applyTheme);
   })();
 </script>
 
