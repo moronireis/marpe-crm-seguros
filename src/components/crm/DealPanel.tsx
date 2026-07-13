@@ -35,6 +35,8 @@ interface Props {
   stages: Stage[];
   onClose: () => void;
   onUpdated: () => void;
+  /** Aba aberta ao montar/trocar de negócio (ícones de acesso rápido do card) */
+  initialTab?: TabKey;
 }
 
 const LOSS_REASONS = [
@@ -59,12 +61,17 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'perfil', label: 'Corp' },
 ];
 
-export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props) {
+export default function DealPanel({ dealId, stages, onClose, onUpdated, initialTab }: Props) {
   const [deal, setDeal] = useState<Deal | null>(null);
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>('info');
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab || 'info');
+
+  // Ao trocar de negócio (ou de aba pedida pelos ícones do card), abre na aba certa
+  useEffect(() => {
+    setActiveTab(initialTab || 'info');
+  }, [dealId, initialTab]);
 
   // Loss reason modal state
   const [pendingStageId, setPendingStageId] = useState<string | null>(null);
@@ -256,17 +263,8 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
             {deal.marpe_funnels?.name} · {deal.marpe_funnel_stages?.name}
           </div>
         </div>
-        {contact?.id && contact?.phone && (
-          <a href={`/inbox?contact=${contact.id}`} title="Abrir conversa no inbox"
-            style={{ width: 30, height: 30, borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', marginRight: 2, transition: 'all 0.2s var(--ease-out)', flexShrink: 0 }}
-            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent-light)'; (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(59,130,246,0.4)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)'; (e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--hairline)'; }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          </a>
-        )}
+        {/* Ícone de conversa removido (checkpoint 10/07, item 3 — sugestão do Tiago):
+            a interação fica pela aba Conversas logo abaixo */}
         <button style={styles.closeBtn} onClick={onClose} aria-label="Fechar painel">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
@@ -318,6 +316,7 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated }: Props)
             contactPhone={contact?.phone || null}
             contactId={contact?.id || null}
             onSendMessage={handleSendMessage}
+            varContext={{ contact: contact || undefined, deal }}
           />
         )}
 

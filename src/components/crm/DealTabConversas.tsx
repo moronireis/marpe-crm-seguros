@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
+import { interpolateVariables, type InterpolationContext } from '../../lib/variables';
 
 interface Message {
   id: string;
@@ -16,23 +17,34 @@ interface Props {
   contactPhone: string | null;
   contactId: string | null;
   onSendMessage: (text: string) => Promise<void>;
+  /** Contexto para o preview de variáveis ({{primeiro_nome}} etc.) — item 5 do checkpoint */
+  varContext?: InterpolationContext;
 }
 
-export default function DealTabConversas({ dealId, contactPhone, contactId, onSendMessage }: Props) {
+export default function DealTabConversas({ dealId, contactPhone, contactId, onSendMessage, varContext }: Props) {
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Template picker: "/" prefix opens the dropdown (same UX as the inbox)
   const templates = useTemplates();
   const pickerOpen = text.startsWith('/');
+  const hasVars = /\{\{\w+\}\}/.test(text);
+
+  function resizeComposer() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 132) + 'px';
+  }
 
   function selectTemplate(tpl: Template) {
     setText(tpl.body);
     inputRef.current?.focus();
+    requestAnimationFrame(resizeComposer);
   }
 
   // Filters
@@ -85,6 +97,7 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
     await onSendMessage(text);
     setText('');
     setSending(false);
+    if (inputRef.current) inputRef.current.style.height = 'auto';
     loadMessages();
   }
 
@@ -181,33 +194,42 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
         <div ref={endRef} />
       </div>
 
-      {/* Send input */}
+      {/* Send input — textarea expansível + preview de variáveis (item 5) */}
       {contactPhone ? (
-        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', gap: 6, flexShrink: 0, position: 'relative' }}>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0, position: 'relative' }}>
           <TemplateDropdown
             visible={pickerOpen}
             filter={pickerOpen ? text.slice(1).toLowerCase() : ''}
             templates={templates}
             onSelect={selectTemplate}
           />
-          <input
-            ref={inputRef}
-            value={text}
-            onChange={e => setText(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Escape' && pickerOpen) { setText(''); return; }
-              if (e.key === 'Enter' && !e.shiftKey && !pickerOpen) { e.preventDefault(); handleSend(); }
-            }}
-            placeholder="Digite / para templates ou mensagem..."
-            style={{ flex: 1, padding: '8px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit' }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={sending || !text.trim() || pickerOpen}
-            style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', boxShadow: '0 2px 10px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: (sending || pickerOpen) ? 0.6 : 1, transition: 'all 0.2s var(--ease-out)' }}
-          >
-            Enviar
-          </button>
+          {hasVars && !pickerOpen && (
+            <div className="fade-in" style={{ padding: '7px 10px', borderRadius: 10, background: 'var(--accent-dim)', border: '1px dashed rgba(59,130,246,0.3)', fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent-light)', display: 'block', marginBottom: 2 }}>Preview da mensagem</span>
+              {interpolateVariables(text, varContext || {})}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={text}
+              onChange={e => { setText(e.target.value); resizeComposer(); }}
+              onKeyDown={e => {
+                if (e.key === 'Escape' && pickerOpen) { setText(''); return; }
+                if (e.key === 'Enter' && !e.shiftKey && !pickerOpen) { e.preventDefault(); handleSend(); }
+              }}
+              placeholder="Digite / para templates ou mensagem..."
+              style={{ flex: 1, padding: '8px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 10, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', resize: 'none', maxHeight: 132, lineHeight: 1.5, boxSizing: 'border-box' }}
+            />
+            <button
+              onClick={handleSend}
+              disabled={sending || !text.trim() || pickerOpen}
+              style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', boxShadow: '0 2px 10px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: (sending || pickerOpen) ? 0.6 : 1, transition: 'all 0.2s var(--ease-out)', flexShrink: 0 }}
+            >
+              Enviar
+            </button>
+          </div>
         </div>
       ) : (
         <div style={{ padding: 12, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', borderTop: '1px solid var(--border)', flexShrink: 0 }}>

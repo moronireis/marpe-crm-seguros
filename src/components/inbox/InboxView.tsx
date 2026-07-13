@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
+import { interpolateVariables } from '../../lib/variables';
 
 interface Contact {
   id: string; name: string; phone: string | null; email: string | null;
@@ -468,7 +469,7 @@ export default function InboxView() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [templateFilter, setTemplateFilter] = useState('');
   const msgEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [waConnected, setWaConnected] = useState<boolean | null>(null);
   // CRM panel — editable contact fields
@@ -484,6 +485,9 @@ export default function InboxView() {
   const [corpSyncMsg, setCorpSyncMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   // Fix 6: track which contacts have been opened (read) this session
   const [readContactIds, setReadContactIds] = useState<Set<string>>(new Set());
+  // Contato aberto via deep-link (?contact=) que pode não estar na 1ª página da
+  // lista (limit 50) — mantido à parte para sobreviver ao polling da lista
+  const [pinnedContact, setPinnedContact] = useState<Contact | null>(null);
 
   // Check WhatsApp connection status
   useEffect(() => {
@@ -568,6 +572,12 @@ export default function InboxView() {
     const contactParam = params.get('contact');
     if (contactParam) {
       setActiveContactId(contactParam);
+      // Checkpoint 10/07 item 3: o contato pode não estar entre os 50 da lista —
+      // busca direto e "pina" para o chat abrir mesmo assim
+      fetch(`/api/contacts/${contactParam}`)
+        .then(r => r.json())
+        .then(d => { if (d.contact) setPinnedContact(d.contact); })
+        .catch(() => {});
       // Clean URL without reloading
       const url = new URL(window.location.href);
       url.searchParams.delete('contact');
@@ -575,7 +585,13 @@ export default function InboxView() {
     }
   }, []);
 
+  const activeContact =
+    contacts.find(c => c.id === activeContactId) ||
+    (pinnedContact && pinnedContact.id === activeContactId ? pinnedContact : undefined);
+  const isGroupContact = (activeContact as any)?.source === 'whatsapp_group';
+
   // Populate editable fields when active contact changes
+  // (activeContact?.id no deps: cobre o caso do contato pinado chegar depois via fetch)
   useEffect(() => {
     if (activeContact) {
       setEditName(activeContact.name || '');
@@ -585,14 +601,20 @@ export default function InboxView() {
       setEditNotes('');
       setSaveSuccess(false);
     }
-  }, [activeContactId]);
+  }, [activeContactId, activeContact?.id]);
 
-  const activeContact = contacts.find(c => c.id === activeContactId);
-  const isGroupContact = (activeContact as any)?.source === 'whatsapp_group';
+  // Composer expansível (checkpoint 10/07, item 5)
+  function resizeComposer() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 132) + 'px';
+  }
 
   // Handle input change — detect "/" prefix to show template picker
   function handleMsgChange(value: string) {
     setNewMsg(value);
+    resizeComposer();
     if (value.startsWith('/')) {
       setShowTemplates(true);
       setTemplateFilter(value.slice(1).toLowerCase());
@@ -608,7 +630,10 @@ export default function InboxView() {
     setShowTemplates(false);
     setTemplateFilter('');
     inputRef.current?.focus();
+    requestAnimationFrame(resizeComposer);
   }
+
+  const composerHasVars = /\{\{\w+\}\}/.test(newMsg);
 
   async function syncCorp() {
     if (!activeContact?.corp_id || corpSyncing) return;
@@ -679,6 +704,7 @@ export default function InboxView() {
         body: JSON.stringify({ contact_id: activeContactId, phone: phoneToSend, text: newMsg }),
       });
       setNewMsg('');
+      if (inputRef.current) inputRef.current.style.height = 'auto';
       // Refresh messages
       const r = await fetch(`/api/messages?contact_id=${activeContactId}`);
       const d = await r.json();
@@ -936,7 +962,7 @@ export default function InboxView() {
           </div>
 
           {/* Fix 7: groups and individual contacts both get the send area — barra flutuante de vidro */}
-          <div className="glass-nav anim" style={{ ['--i' as any]: 3, borderRadius: 999, padding: '8px 8px 8px 18px', flexShrink: 0, position: 'relative' }}>
+          <div className="glass-nav anim" style={{ ['--i' as any]: 3, borderRadius: 24, padding: '8px 8px 8px 18px', flexShrink: 0, position: 'relative' }}>
               {/* Template picker popup */}
               <TemplateDropdown
                 visible={showTemplates}
@@ -946,14 +972,21 @@ export default function InboxView() {
                 left={16}
                 right={16}
               />
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <input ref={inputRef} value={newMsg} onChange={e => handleMsgChange(e.target.value)}
+              {/* Preview de variáveis (item 5) — some quando o picker "/" está aberto */}
+              {composerHasVars && !showTemplates && (
+                <div className="glass-modal fade-in" style={{ position: 'absolute', bottom: 'calc(100% + 10px)', left: 16, right: 16, zIndex: 40, borderRadius: 14, padding: '9px 13px', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent-light)', display: 'block', marginBottom: 3 }}>Preview da mensagem</span>
+                  {interpolateVariables(newMsg, { contact: activeContact })}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                <textarea ref={inputRef} rows={1} value={newMsg} onChange={e => handleMsgChange(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === 'Escape') { setShowTemplates(false); return; }
                     if (e.key === 'Enter' && !e.shiftKey && !showTemplates) { e.preventDefault(); sendMessage(); }
                   }}
                   placeholder="Digite / para templates ou mensagem..." disabled={sending}
-                  style={{ flex: 1, padding: '8px 0', background: 'transparent', border: 'none', borderRadius: 0, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxShadow: 'none' }}
+                  style={{ flex: 1, padding: '8px 0', background: 'transparent', border: 'none', borderRadius: 0, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxShadow: 'none', resize: 'none', maxHeight: 132, lineHeight: 1.5 }}
                 />
                 <button onClick={sendMessage} disabled={sending || !newMsg.trim() || showTemplates}
                   style={{ width: 38, height: 38, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: (sending || !newMsg.trim() || showTemplates) ? 0.45 : 1, transition: 'opacity 0.18s var(--ease-out), box-shadow 0.2s var(--ease-out), transform 0.22s var(--ease-spring)', boxShadow: (!sending && newMsg.trim()) ? '0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)' : 'inset 0 1px 0 rgba(255,255,255,0.2)' }}

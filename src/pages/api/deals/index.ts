@@ -18,7 +18,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
   const all: any[] = [];
   for (let page = 0; ; page++) {
     let query = sb.from('marpe_deals')
-      .select('*, marpe_contacts(id, name, phone, email, tags), marpe_funnel_stages(id, name, color, sort_order, is_terminal, terminal_type), marpe_profiles!responsible_id(id, full_name)')
+      .select('*, marpe_contacts(id, name, phone, email, tags, photo_url), marpe_funnel_stages(id, name, color, sort_order, is_terminal, terminal_type), marpe_profiles!responsible_id(id, full_name)')
       .order('created_at', { ascending: false })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
     if (funnelId) query = query.eq('funnel_id', funnelId);

@@ -74,6 +74,68 @@ const DEAL_TYPE_LABELS: Record<string, string> = {
   endosso: 'Endosso',
 };
 
+// ─── Card helpers (checkpoint 10/07, item 1 — padrão waSpeed) ─────────────────
+const AVATAR_COLORS = ['#60A5FA', '#4ade80', '#fbbf24', '#a78bfa', '#22d3ee', '#f87171', '#fb923c'];
+
+function avatarColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function cardInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
+function CardAvatar({ contact }: { contact: { name: string; photo_url?: string | null } | null }) {
+  const name = contact?.name || '?';
+  return (
+    <div style={{
+      position: 'relative', width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+      overflow: 'hidden', background: 'var(--field-bg)', border: '1px solid var(--hairline)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 8.5, fontWeight: 700, color: avatarColor(name),
+    }}>
+      {cardInitials(name)}
+      {contact?.photo_url && (
+        <img
+          src={contact.photo_url}
+          alt=""
+          loading="lazy"
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+        />
+      )}
+    </div>
+  );
+}
+
+function QuickAction({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={e => { e.stopPropagation(); onClick(); }}
+      onPointerDown={e => e.stopPropagation()}
+      style={{
+        width: 26, height: 24, borderRadius: 7, border: '1px solid transparent',
+        background: 'transparent', color: 'var(--text-muted)', padding: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', transition: 'all 0.18s var(--ease-out)',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--field-bg)'; e.currentTarget.style.color = 'var(--accent-light)'; e.currentTarget.style.borderColor = 'var(--hairline)'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'transparent'; }}
+    >
+      {children}
+    </button>
+  );
+}
+
+const QA_ICON: React.CSSProperties = { width: 13, height: 13 };
+
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 interface Funnel { id: string; name: string; stages: Stage[]; }
 interface Stage { id: string; name: string; color: string; sort_order: number; is_terminal?: boolean; terminal_type?: string | null; }
@@ -85,7 +147,7 @@ interface Deal {
   next_action: string | null; next_action_date: string | null;
   produtor: string | null; responsible_id: string | null;
   created_at: string | null;
-  marpe_contacts: { id: string; name: string; phone: string | null } | null;
+  marpe_contacts: { id: string; name: string; phone: string | null; photo_url?: string | null } | null;
   marpe_funnel_stages: { id: string; name: string; color: string } | null;
   marpe_profiles: { id: string; full_name: string } | null;
 }
@@ -990,6 +1052,13 @@ export default function CrmBoard() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeDealId, setActiveDealId] = useState<string | null>(null);
+  // Aba inicial do painel quando aberto pelos ícones de acesso rápido do card
+  const [activeDealTab, setActiveDealTab] = useState<'conversas' | 'anotacoes' | 'documentos' | undefined>(undefined);
+
+  function openDeal(id: string, tab?: 'conversas' | 'anotacoes' | 'documentos') {
+    setActiveDealTab(tab);
+    setActiveDealId(id);
+  }
   // Per-column render cap (Emitido has 4k+ deals — rendering all would freeze the DOM)
   const [visibleByStage, setVisibleByStage] = useState<Record<string, number>>({});
   const COLUMN_PAGE = 50;
@@ -1010,6 +1079,21 @@ export default function CrmBoard() {
 
   // ── Sort state ────────────────────────────────────────────────────────────
   const [gradeSortDir, setGradeSortDir] = useState<'asc' | 'desc'>('asc');
+
+  // ── Janela de recência (checkpoint 10/07, item 11) ────────────────────────
+  // Por padrão o board mostra só negócios com atividade nos últimos 12 meses
+  // (created_at OU next_action_date). Busca/filtros ignoram a janela.
+  const RECENCY_MONTHS = 12;
+  const [showOld, setShowOld] = useState(false);
+  const recencyCutoff = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - RECENCY_MONTHS);
+    return d.toISOString().slice(0, 10);
+  }, []);
+  const isRecent = useCallback((d: Deal) =>
+    (d.created_at || '').slice(0, 10) >= recencyCutoff ||
+    (d.next_action_date || '') >= recencyCutoff,
+  [recencyCutoff]);
 
   // ── Drag-and-drop ──────────────────────────────────────────────────────────
   const [draggingDealId, setDraggingDealId] = useState<string | null>(null);
@@ -1157,7 +1241,12 @@ export default function CrmBoard() {
     in7.setHours(23, 59, 59, 999);
     const q = searchDebounced.toLowerCase().trim();
 
+    // Janela de recência só vale sem busca/filtros ativos — busca encontra antigos
+    const bypassWindow = showOld || !!q || countActiveFilters(filters) > 0;
+
     return deals.filter(d => {
+      if (!bypassWindow && !isRecent(d)) return false;
+
       // Search
       if (q) {
         const name = (d.marpe_contacts?.name || '').toLowerCase();
@@ -1202,7 +1291,10 @@ export default function CrmBoard() {
 
       return true;
     });
-  }, [deals, searchDebounced, filters]);
+  }, [deals, searchDebounced, filters, showOld, isRecent]);
+
+  // Quantos negócios antigos existem no funil (para o chip da janela de recência)
+  const oldCount = useMemo(() => deals.reduce((n, d) => n + (isRecent(d) ? 0 : 1), 0), [deals, isRecent]);
 
   // Deals sorted by next_action_date for Kanban
   const sortByNextAction = useCallback((arr: Deal[]) =>
@@ -1451,16 +1543,20 @@ export default function CrmBoard() {
           </div>
         </div>
 
-        {/* ── Fix 19: Color legend for ramo tags ─────────────────────────── */}
-        {!isMobile && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '8px 22px 0', flexShrink: 0 }}>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Ramo:</span>
-            {Object.entries(RAMO_COLORS).map(([ramo, { color }]) => (
-              <span key={ramo} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flexShrink: 0 }} />
-                {ramo}
-              </span>
-            ))}
+        {/* ── Chip da janela de recência (item 11 — legenda de ramos removida, item 4) ── */}
+        {!loading && oldCount > 0 && !isFiltering && (
+          <div style={{ display: 'flex', alignItems: 'center', padding: '8px 20px 0', flexShrink: 0 }}>
+            <span className="fade-in" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 999, padding: '3px 11px' }}>
+              {showOld
+                ? `Mostrando todos os negócios, incluindo ${oldCount.toLocaleString('pt-BR')} sem atividade há mais de ${RECENCY_MONTHS} meses`
+                : `Mostrando os últimos ${RECENCY_MONTHS} meses · ${oldCount.toLocaleString('pt-BR')} antigos ocultos`}
+              <button
+                onClick={() => setShowOld(v => !v)}
+                style={{ border: 'none', background: 'none', color: 'var(--accent-light)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
+              >
+                {showOld ? 'Ver só recentes' : 'Ver todos'}
+              </button>
+            </span>
           </div>
         )}
 
@@ -1522,11 +1618,11 @@ export default function CrmBoard() {
                           <DraggableCard key={d.id} id={d.id}>
                             <div
                               className="card-surface card-hover"
-                              onClick={() => setActiveDealId(d.id)}
+                              onClick={() => openDeal(d.id)}
                               style={{
                                 borderLeft: `3px solid ${r.color}`,
                                 borderRadius: 12,
-                                padding: 13,
+                                padding: '12px 13px 8px',
                                 cursor: 'grab',
                                 ...(activeDealId === d.id ? {
                                   background: 'var(--accent-dim)',
@@ -1536,8 +1632,9 @@ export default function CrmBoard() {
                                 } : {}),
                               }}
                             >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                                <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                <CardAvatar contact={d.marpe_contacts} />
+                                <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
                                   {d.marpe_contacts?.name || d.title}
                                 </span>
                                 {d.ramo && (
@@ -1569,6 +1666,37 @@ export default function CrmBoard() {
                               <div style={{ display: 'flex', gap: 12, fontSize: 10 }}>
                                 {d.premio && <span><span style={{ color: 'var(--text-muted)' }}>Prêmio </span><span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{formatPremio(d.premio)}</span></span>}
                                 {d.apolice && <span style={{ color: 'var(--text-muted)' }}>#{d.apolice.slice(-6)}</span>}
+                              </div>
+                              {/* Ações rápidas (item 1 do checkpoint — padrão waSpeed) */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--border-subtle)' }}>
+                                <QuickAction title="Conversas" onClick={() => openDeal(d.id, 'conversas')}>
+                                  <svg style={QA_ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                </QuickAction>
+                                <QuickAction title="Notas" onClick={() => openDeal(d.id, 'anotacoes')}>
+                                  <svg style={QA_ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                                </QuickAction>
+                                <QuickAction title="Documentos" onClick={() => openDeal(d.id, 'documentos')}>
+                                  <svg style={QA_ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                </QuickAction>
+                                {d.marpe_contacts?.id && (
+                                  <a
+                                    href={`/contato/${d.marpe_contacts.id}`}
+                                    title="Perfil do contato"
+                                    aria-label="Perfil do contato"
+                                    onClick={e => e.stopPropagation()}
+                                    onPointerDown={e => e.stopPropagation()}
+                                    style={{
+                                      width: 26, height: 24, borderRadius: 7, border: '1px solid transparent',
+                                      background: 'transparent', color: 'var(--text-muted)',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      cursor: 'pointer', transition: 'all 0.18s var(--ease-out)', textDecoration: 'none',
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--field-bg)'; e.currentTarget.style.color = 'var(--accent-light)'; e.currentTarget.style.borderColor = 'var(--hairline)'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'transparent'; }}
+                                  >
+                                    <svg style={QA_ICON} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                  </a>
+                                )}
                               </div>
                             </div>
                           </DraggableCard>
@@ -1638,7 +1766,7 @@ export default function CrmBoard() {
                   return (
                     <tr
                       key={d.id}
-                      onClick={() => setActiveDealId(d.id)}
+                      onClick={() => openDeal(d.id)}
                       style={{ cursor: 'pointer' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.02)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -1716,7 +1844,8 @@ export default function CrmBoard() {
         <DealPanel
           dealId={activeDealId}
           stages={stages}
-          onClose={() => setActiveDealId(null)}
+          initialTab={activeDealTab}
+          onClose={() => { setActiveDealId(null); setActiveDealTab(undefined); }}
           onUpdated={reloadDeals}
         />
       )}
