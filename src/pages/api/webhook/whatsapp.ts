@@ -224,7 +224,7 @@ export const POST: APIRoute = async ({ request }) => {
       // Update group name and photo if we have better data
       const updates: Record<string, any> = {};
       if (groupName && !groupName.includes('@g.us')) updates.name = groupName;
-      if (profilePicUrl) updates.photo_url = profilePicUrl;
+      if (profilePicUrl) { updates.photo_url = profilePicUrl; updates.photo_synced_at = new Date().toISOString(); }
       if (Object.keys(updates).length > 0) {
         await sb.from('marpe_contacts').update(updates).eq('id', existingGroup.id);
       }
@@ -236,7 +236,7 @@ export const POST: APIRoute = async ({ request }) => {
           name: groupName,
           phone: groupJid,
           source: 'whatsapp_group',
-          ...(profilePicUrl ? { photo_url: profilePicUrl } : {}),
+          ...(profilePicUrl ? { photo_url: profilePicUrl, photo_synced_at: new Date().toISOString() } : {}),
         })
         .select('id')
         .single();
@@ -269,7 +269,7 @@ export const POST: APIRoute = async ({ request }) => {
       }
 
       // Always update photo_url when we receive one (WhatsApp pics change over time)
-      if (profilePicUrl) updates.photo_url = profilePicUrl;
+      if (profilePicUrl) { updates.photo_url = profilePicUrl; updates.photo_synced_at = new Date().toISOString(); }
 
       if (Object.keys(updates).length > 0) {
         updates.updated_at = new Date().toISOString();
@@ -286,7 +286,7 @@ export const POST: APIRoute = async ({ request }) => {
       if (partial?.id) {
         contactId = partial.id;
         if (profilePicUrl) {
-          await sb.from('marpe_contacts').update({ photo_url: profilePicUrl, updated_at: new Date().toISOString() }).eq('id', partial.id);
+          await sb.from('marpe_contacts').update({ photo_url: profilePicUrl, photo_synced_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', partial.id);
         }
       } else {
         // Create new contact from WhatsApp
@@ -296,7 +296,7 @@ export const POST: APIRoute = async ({ request }) => {
             name: senderName || phone,
             phone,
             source: 'whatsapp',
-            ...(profilePicUrl ? { photo_url: profilePicUrl } : {}),
+            ...(profilePicUrl ? { photo_url: profilePicUrl, photo_synced_at: new Date().toISOString() } : {}),
           })
           .select('id')
           .single();

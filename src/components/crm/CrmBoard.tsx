@@ -1115,9 +1115,11 @@ export default function CrmBoard() {
   // ── Sort state ────────────────────────────────────────────────────────────
   const [gradeSortDir, setGradeSortDir] = useState<'asc' | 'desc'>('asc');
 
-  // ── Janela de recência (checkpoint 10/07, item 11) ────────────────────────
-  // Por padrão o board mostra só negócios com atividade nos últimos 12 meses
-  // (created_at OU next_action_date). Busca/filtros ignoram a janela.
+  // ── Janela de recência (checkpoint 10/07 item 11; v2 no checkpoint 14/07) ──
+  // Por padrão o board mostra só negócios com atividade nos últimos 12 meses.
+  // v2: created_at NÃO conta — nos deals sincronizados é a data do INSERT do
+  // sync (todos recentes), o que tornava a janela inócua. Critério: próxima
+  // ação; senão fim de vigência; sem datas → sempre visível.
   const RECENCY_MONTHS = 12;
   const [showOld, setShowOld] = useState(false);
   const recencyCutoff = useMemo(() => {
@@ -1125,10 +1127,15 @@ export default function CrmBoard() {
     d.setMonth(d.getMonth() - RECENCY_MONTHS);
     return d.toISOString().slice(0, 10);
   }, []);
-  const isRecent = useCallback((d: Deal) =>
-    (d.created_at || '').slice(0, 10) >= recencyCutoff ||
-    (d.next_action_date || '') >= recencyCutoff,
-  [recencyCutoff]);
+  const isRecent = useCallback((d: Deal) => {
+    if (d.next_action_date) return d.next_action_date >= recencyCutoff;
+    if (d.vigencia_fim) return d.vigencia_fim >= recencyCutoff;
+    return true;
+  }, [recencyCutoff]);
+
+  // Ordenação do kanban (checkpoint 14/07): vencidas primeiro (asc, padrão
+  // operacional) ou mais recentes primeiro (desc)
+  const [sortRecentFirst, setSortRecentFirst] = useState(false);
 
   // ── Drag-and-drop ──────────────────────────────────────────────────────────
   const [draggingDealId, setDraggingDealId] = useState<string | null>(null);
@@ -1331,14 +1338,15 @@ export default function CrmBoard() {
   // Quantos negócios antigos existem no funil (para o chip da janela de recência)
   const oldCount = useMemo(() => deals.reduce((n, d) => n + (isRecent(d) ? 0 : 1), 0), [deals, isRecent]);
 
-  // Deals sorted by next_action_date for Kanban
+  // Deals sorted by next_action_date for Kanban (direção pelo toggle; nulls sempre no fim)
   const sortByNextAction = useCallback((arr: Deal[]) =>
     [...arr].sort((a, b) => {
       if (!a.next_action_date && !b.next_action_date) return 0;
       if (!a.next_action_date) return 1;
       if (!b.next_action_date) return -1;
-      return a.next_action_date.localeCompare(b.next_action_date);
-    }), []);
+      const cmp = a.next_action_date.localeCompare(b.next_action_date);
+      return sortRecentFirst ? -cmp : cmp;
+    }), [sortRecentFirst]);
 
   const dealsByStage = (stageId: string) =>
     sortByNextAction(filteredDeals.filter(d => d.stage_id === stageId));
@@ -1558,6 +1566,27 @@ export default function CrmBoard() {
             </button>
 
             {!isMobile && <ExportFunnelButton funnelId={activeFunnelId} />}
+
+            {/* Ordenação do kanban (checkpoint 14/07 — "fixa ou configurável" → configurável) */}
+            {!isMobile && viewMode === 'kanban' && (
+              <button
+                onClick={() => setSortRecentFirst(v => !v)}
+                title="Alternar ordenação dos cards por data da próxima ação"
+                style={{
+                  padding: '7px 12px', borderRadius: 10, height: 34,
+                  border: '1px solid var(--hairline)', background: 'var(--field-bg)',
+                  color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
+                  fontFamily: 'inherit', fontWeight: 500,
+                  display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+                  transition: 'all 0.2s var(--ease-out)',
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: sortRecentFirst ? 'rotate(180deg)' : 'none', transition: 'transform 0.25s var(--ease-spring)' }}>
+                  <line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>
+                </svg>
+                {sortRecentFirst ? 'Mais recentes' : 'Vencidas primeiro'}
+              </button>
+            )}
 
             {/* View toggle */}
             {!isMobile && (['kanban', 'grade'] as const).map(m => (
