@@ -1,8 +1,42 @@
-# Plano — Checkpoint Tiago 10/07 (Novos Ajustes)
+# Plano — Checkpoints Tiago 10/07 + 14/07
 
-Last updated: 2026-07-13
-Fonte: `Downloads/Checkpoint (Marpe) - 1007 - Novos Ajustes.pdf` (Tiago Donicht — u4digital, 12 itens)
-Status: item 2 RESOLVIDO em prod (hotfix 13/07, befe08b) · Sprint A IMPLEMENTADO (13/07, commit d00e2a7) — preview na Vercel aguardando aprovação para prod · Sprints B-D pendentes
+Last updated: 2026-07-14
+Fontes: `Downloads/Checkpoint (Marpe) - 1007 - Novos Ajustes.pdf` (12 itens) + `Checkpoint (Marpe) - 14072026 - Ajustes.pdf` (4 itens)
+Status: item 2 em prod (befe08b) · Sprint A EM PROD (d00e2a7, 13/07) · Sprint B IMPLEMENTADO (beeaaa0, 13/07) — preview aguardando aprovação · B2/E planejados (14/07) · Sprints C-D pendentes
+
+---
+
+## Checkpoint 14/07 — diagnóstico dos 4 itens
+
+| Item (14/07) | Diagnóstico (verificado 14/07) | Destino |
+|---|---|---|
+| Foto do contato no card | Só **29 de 1.400** contatos têm photo_url (webhook captura em poucos casos). Discovery feita: `POST /chat/details {number}` na UazapiGO retorna `image`/`imagePreview` (validado com número real). ATENÇÃO: URLs pps.whatsapp.net **expiram** → precisa refresh periódico | **Sprint E** (novo) |
+| #11 (reincidente) — antigos ainda aparecem | **Bug da janela do Sprint A**: `created_at` dos deals sincronizados é a data do INSERT do sync (jun-jul/26) — janela atual esconde **0** deals. Janela v2 por `next_action_date`/`vigencia_fim` esconderia **1.108 de 4.690** (validado com dados reais) | **Sprint B2** (fix) |
+| #6 (reincidente) — dropdowns Corp na Info | **JÁ IMPLEMENTADO** no Sprint B (beeaaa0) — o Tiago auditou a prod, que só tinha o Sprint A | Validar preview → **prod** |
+| #7 (reincidente) — Base de cálculo + Campanha no modal | **JÁ IMPLEMENTADO** no Sprint B (idem) | Validar preview → **prod** |
+
+### Sprint B2 — janela de recência v2 + ordenação (fix do item 11)
+
+1. `isRecent` v2 em CrmBoard: `next_action_date >= cutoff` → senão `vigencia_fim >= cutoff` → senão **visível** (deals sem datas nunca são escondidos; `created_at` deixa de contar para deals com corp_id — é data de sync, não do negócio)
+2. Toggle de ordenação no kanban respondendo à dúvida do PDF ("fixa ou configurável"): **"Vencidas primeiro"** (atual — próxima ação ascendente, faz sentido operacional) ↔ **"Mais recentes"** (descendente). Configurável por sessão, padrão vencidas primeiro
+3. Chip "N antigos ocultos — Ver todos" passa a mostrar números reais (hoje mostra 0 e some)
+
+### Sprint E — sincronização de fotos do WhatsApp
+
+1. Migração: coluna `photo_synced_at timestamptz` em `marpe_contacts` (via `run-migration` Playwright, padrão do projeto)
+2. `src/lib/whatsapp/photos.ts`: `fetchProfilePhoto(number)` → `POST /chat/details` (rota validada 14/07; retorna `image` cheia + `imagePreview`)
+3. `POST /api/internal/sync-photos`: batch de ~50 contatos por execução, prioridade para (a) sem photo_url, (b) photo_synced_at mais antigo (refresh das URLs que expiram); throttle entre chamadas; protegido por CRON_SECRET (padrão /api/internal)
+4. Cron Vercel diário encadeado à janela do Corp sync (3am) até cobrir os 1.400 contatos; depois vira refresh contínuo
+5. Webhook inbound: atualizar photo_url/photo_synced_at quando o payload trouxer foto (verificar handler no momento da implementação)
+6. Front: nada a fazer — `CardAvatar` (Sprint A) já usa photo_url e cai para iniciais quando a URL quebra/expira
+7. Se na prática as URLs expirarem rápido demais: fase 2 opcional = baixar e servir de bucket Supabase (não fazer antecipadamente)
+
+### Ordem de execução proposta (14/07)
+
+1. Moroni valida o preview do Sprint B → **prod** (mata #6/#7 do novo checkpoint)
+2. **Sprint B2** (rápido — mesmo arquivo do board) → junto no mesmo deploy
+3. **Sprint E** (fotos) — 1 sessão
+4. Sprints **C** (renovações/sinistros) e **D** (conversas por negócio) seguem na fila — D ainda travado nas perguntas ao Tiago/Marcel
 
 ---
 
