@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-14
 Fontes: `Downloads/Checkpoint (Marpe) - 1007 - Novos Ajustes.pdf` (12 itens) + `Checkpoint (Marpe) - 14072026 - Ajustes.pdf` (4 itens)
-Status: item 2 em prod (befe08b) · Sprint A EM PROD (d00e2a7, 13/07) · Sprint B IMPLEMENTADO (beeaaa0, 13/07) — preview aguardando aprovação · B2/E planejados (14/07) · Sprints C-D pendentes
+Status: EM PROD 14/07 (32548fc): Sprints B (#6/#7), B2 (janela v2 + ordenação) e E (fotos WhatsApp, backfill rodando + cron diário 07h UTC) · Restam Sprints C (renovações/sinistros) e D (conversas por negócio — aguarda decisão Tiago/Marcel)
 
 ---
 
