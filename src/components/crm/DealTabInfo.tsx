@@ -12,12 +12,16 @@ interface Deal {
   vigencia_atual_fim: string | null; corretora_atual: string | null;
   base_calculo_repasse: number | null; pct_repasse: number | null; valor_repasse: number | null;
   agente: string | null; observacoes_proposta: string | null; produtor: string | null;
+  responsible_id: string | null;
+  marpe_profiles: { id: string; full_name: string } | null;
   marpe_contacts: { id: string; name: string; phone: string | null; email: string | null; city: string | null } | null;
 }
 
 interface Props {
   deal: Deal;
   onSave: (updates: Record<string, unknown>) => Promise<void>;
+  /** Usuário logado — responsável padrão quando o negócio não tem um (checkpoint 14/07) */
+  currentUser?: { id: string; full_name: string };
 }
 
 // Pick-lists do Corp para a edição (checkpoint 10/07, item 6)
@@ -63,20 +67,30 @@ const s = {
   checkbox: { accentColor: 'var(--accent)', margin: 0 } as React.CSSProperties,
 };
 
-export default function DealTabInfo({ deal, onSave }: Props) {
+export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({});
   const [lookups, setLookups] = useState<InfoLookups | null>(null);
+  const [users, setUsers] = useState<{ id: string; full_name: string }[]>([]);
+  const [campanhaLivre, setCampanhaLivre] = useState(false);
 
-  // Pick-lists do Corp ao entrar no modo edição (endpoint cacheia 10 min)
+  // Pick-lists do Corp + usuários ao entrar no modo edição (lookups cacheia 10 min)
   useEffect(() => {
-    if (!editing || lookups) return;
-    fetch('/api/corp/lookups')
-      .then(r => r.json())
-      .then(d => setLookups(d))
-      .catch(() => {});
-  }, [editing, lookups]);
+    if (!editing) return;
+    if (!lookups) {
+      fetch('/api/corp/lookups')
+        .then(r => r.json())
+        .then(d => setLookups(d))
+        .catch(() => {});
+    }
+    if (!users.length) {
+      fetch('/api/users')
+        .then(r => r.json())
+        .then(d => setUsers(d.users || []))
+        .catch(() => {});
+    }
+  }, [editing, lookups, users.length]);
 
   // Select que degrada para o valor atual quando a lista Corp não carregou
   function corpSelect(key: string, options: { nome: string }[] | undefined, placeholder: string) {
@@ -106,8 +120,8 @@ export default function DealTabInfo({ deal, onSave }: Props) {
       comissao_valor: deal.comissao_valor ?? '',
       vigencia_inicio: deal.vigencia_inicio || '',
       vigencia_fim: deal.vigencia_fim || '',
-      veiculo: deal.veiculo || '',
-      placa: deal.placa || '',
+      // Responsável: negócio sem responsável assume o usuário logado (checkpoint 14/07)
+      responsible_id: deal.responsible_id || currentUser?.id || '',
       // Produto Atual
       ja_possui_produto: deal.ja_possui_produto ?? false,
       seguradora_atual: deal.seguradora_atual || '',
@@ -125,6 +139,7 @@ export default function DealTabInfo({ deal, onSave }: Props) {
       next_action: deal.next_action || '',
       next_action_date: deal.next_action_date || '',
     });
+    setCampanhaLivre(false);
   }, [deal]);
 
   function field(key: string) {
@@ -179,8 +194,7 @@ export default function DealTabInfo({ deal, onSave }: Props) {
           <div style={s.row}><span style={s.label}>Seguradora</span><span style={s.value}>{deal.seguradora || '—'}</span></div>
           <div style={s.row}><span style={s.label}>Apólice</span><span style={s.value}>{deal.apolice || '—'}</span></div>
           {deal.campanha && <div style={s.row}><span style={s.label}>Campanha</span><span style={s.value}>{deal.campanha}</span></div>}
-          {deal.veiculo && <div style={s.row}><span style={s.label}>Veículo</span><span style={s.value}>{deal.veiculo}</span></div>}
-          {deal.placa && <div style={s.row}><span style={s.label}>Placa</span><span style={s.value}>{deal.placa}</span></div>}
+          <div style={s.row}><span style={s.label}>Responsável</span><span style={s.value}>{deal.marpe_profiles?.full_name || '—'}</span></div>
           <div style={s.row}><span style={s.label}>Vigência Início</span><span style={s.value}>{displayDate(deal.vigencia_inicio)}</span></div>
           <div style={s.row}><span style={s.label}>Vigência Fim</span><span style={s.value}>{displayDate(deal.vigencia_fim)}</span></div>
         </div>
@@ -277,21 +291,37 @@ export default function DealTabInfo({ deal, onSave }: Props) {
         </div>
         <div style={{ marginTop: 8 }}>
           <label style={s.label}>Campanha</label>
-          <input list="info-campanhas" value={form.campanha} onChange={field('campanha')} placeholder="Campanha (opcional)" style={s.input} />
-          <datalist id="info-campanhas">
-            {(lookups?.campanhas || []).map(c => <option key={`n${c}`} value={c} />)}
-            {(lookups?.campanhas_cod || []).map(c => <option key={`c${c}`} value={`Campanha ${c}`} />)}
-          </datalist>
+          <select
+            value={campanhaLivre ? '__livre' : (form.campanha || '')}
+            onChange={e => {
+              if (e.target.value === '__livre') { setCampanhaLivre(true); setForm(f => ({ ...f, campanha: '' })); }
+              else { setCampanhaLivre(false); setForm(f => ({ ...f, campanha: e.target.value })); }
+            }}
+            style={s.select}
+          >
+            <option value="">—</option>
+            {form.campanha && !campanhaLivre
+              && !(lookups?.campanhas || []).includes(form.campanha)
+              && !(lookups?.campanhas_cod || []).some(c => `Campanha ${c}` === form.campanha)
+              && <option value={form.campanha}>{form.campanha} (atual)</option>}
+            {(lookups?.campanhas || []).map(c => <option key={`n${c}`} value={c}>{c}</option>)}
+            {(lookups?.campanhas_cod || []).map(c => <option key={`c${c}`} value={`Campanha ${c}`}>Campanha {c} (Corp)</option>)}
+            <option value="__livre">Outra (digitar)...</option>
+          </select>
+          {campanhaLivre && (
+            <input value={form.campanha} onChange={field('campanha')} placeholder="Nome da campanha" autoFocus style={{ ...s.input, marginTop: 6 }} />
+          )}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
-          <div>
-            <label style={s.label}>Veículo</label>
-            <input value={form.veiculo} onChange={field('veiculo')} placeholder="Opcional" style={s.input} />
-          </div>
-          <div>
-            <label style={s.label}>Placa</label>
-            <input value={form.placa} onChange={field('placa')} placeholder="Opcional" style={s.input} />
-          </div>
+        <div style={{ marginTop: 8 }}>
+          <label style={s.label}>Responsável</label>
+          {users.length ? (
+            <select value={form.responsible_id || ''} onChange={field('responsible_id')} style={s.select}>
+              <option value="">—</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.full_name}{u.id === currentUser?.id ? ' (você)' : ''}</option>)}
+            </select>
+          ) : (
+            <input value={currentUser?.full_name || ''} disabled readOnly style={{ ...s.input, opacity: 0.75 }} />
+          )}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
           <div>

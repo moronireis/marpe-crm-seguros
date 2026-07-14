@@ -20,6 +20,7 @@ export const GET: APIRoute = async ({ locals, params }) => {
       marpe_contacts(id, name, phone, email, city, tags, corp_id),
       marpe_funnel_stages(id, name, color, sort_order, is_terminal, terminal_type),
       marpe_funnels(id, name),
+      marpe_profiles!responsible_id(id, full_name),
       marpe_deal_activities(id, type, description, created_at, metadata)
     `)
     .eq('id', id)

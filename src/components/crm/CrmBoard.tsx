@@ -153,11 +153,12 @@ interface Deal {
 }
 interface UserOption { id: string; full_name: string; email: string; }
 interface ContactOption { id: string; name: string; phone: string | null; }
+interface CurrentUser { id: string; full_name: string; }
+
 interface NewDealForm {
   contact_id: string;
   ramo: string; seguradora: string; deal_type: string;
   premio: string; comissao_pct: string; pct_repasse: string;
-  veiculo: string; placa: string;
   next_action: string; next_action_date: string;
   // New fields
   campanha: string; ja_possui_produto: boolean;
@@ -167,7 +168,7 @@ interface NewDealForm {
 }
 const EMPTY_FORM: NewDealForm = {
   contact_id: '', ramo: '', seguradora: '', deal_type: 'prospeccao',
-  premio: '', comissao_pct: '', pct_repasse: '', veiculo: '', placa: '',
+  premio: '', comissao_pct: '', pct_repasse: '',
   next_action: '', next_action_date: '',
   campanha: '', ja_possui_produto: false,
   seguradora_atual: '', vigencia_atual_fim: '', corretora_atual: '',
@@ -432,9 +433,10 @@ function MultiSelectFilter({
 }
 
 // ─── NewDealModal ─────────────────────────────────────────────────────────────
-function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
+function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser }: {
   funnels: Funnel[]; activeFunnelId: string;
   onClose: () => void; onCreated: () => void;
+  currentUser?: CurrentUser;
 }) {
   const [form, setForm] = useState<NewDealForm>(EMPTY_FORM);
   const [contactSearch, setContactSearch] = useState('');
@@ -542,8 +544,6 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
         premio: form.premio ? parseFloat(form.premio) : null,
         comissao_pct: form.comissao_pct ? parseFloat(form.comissao_pct) : null,
         pct_repasse: form.pct_repasse ? parseFloat(form.pct_repasse) : null,
-        veiculo: form.veiculo || null,
-        placa: form.placa || null,
         next_action: form.next_action || null,
         next_action_date: form.next_action_date || null,
         campanha: campanhaLabel,
@@ -688,17 +688,6 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={LABEL_S}>Veículo</label>
-              <input value={form.veiculo} onChange={field('veiculo')} placeholder="Opcional" style={INPUT_S} />
-            </div>
-            <div>
-              <label style={LABEL_S}>Placa</label>
-              <input value={form.placa} onChange={field('placa')} placeholder="Opcional" style={INPUT_S} />
-            </div>
-          </div>
-
           {/* Campanha + Produtor + Agente */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div>
@@ -735,6 +724,12 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated }: {
                 <input value={form.agente} onChange={field('agente')} placeholder="Opcional" style={INPUT_S} />
               )}
             </div>
+          </div>
+
+          {/* Responsável — o usuário logado é o responsável pelo negócio (checkpoint 14/07) */}
+          <div>
+            <label style={LABEL_S}>Responsável</label>
+            <input value={currentUser?.full_name || '—'} disabled readOnly style={{ ...INPUT_S, opacity: 0.75, cursor: 'default' }} />
           </div>
 
           {/* Produto Atual */}
@@ -1081,7 +1076,7 @@ function FilterBar({
 }
 
 // ─── CrmBoard ─────────────────────────────────────────────────────────────────
-export default function CrmBoard() {
+export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser }) {
   const [funnels, setFunnels] = useState<Funnel[]>([]);
   const [activeFunnelId, setActiveFunnelId] = useState('');
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -1909,6 +1904,7 @@ export default function CrmBoard() {
           dealId={activeDealId}
           stages={stages}
           initialTab={activeDealTab}
+          currentUser={currentUser}
           onClose={() => { setActiveDealId(null); setActiveDealTab(undefined); }}
           onUpdated={reloadDeals}
         />
@@ -1918,6 +1914,7 @@ export default function CrmBoard() {
         <NewDealModal
           funnels={funnels}
           activeFunnelId={activeFunnelId}
+          currentUser={currentUser}
           onClose={() => setShowNewDeal(false)}
           onCreated={reloadDeals}
         />

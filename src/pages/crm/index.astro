@@ -2,7 +2,10 @@
 import AppLayout from '../../layouts/AppLayout.astro';
 import CrmBoard from '../../components/crm/CrmBoard.tsx';
 export const prerender = false;
+
+const profile = Astro.locals.profile;
+const currentUser = profile ? { id: profile.id, full_name: profile.full_name } : undefined;
 ---
 <AppLayout title="Funis" activeSection="crm">
-  <CrmBoard client:load />
+  <CrmBoard client:load currentUser={currentUser} />
 </AppLayout>

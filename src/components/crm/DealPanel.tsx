@@ -24,6 +24,8 @@ interface Deal {
   base_calculo_repasse: number | null; pct_repasse: number | null; valor_repasse: number | null;
   agente: string | null; observacoes_proposta: string | null; produtor: string | null;
   detalhes_corp: Record<string, any> | null; created_by: string | null;
+  responsible_id: string | null;
+  marpe_profiles: { id: string; full_name: string } | null;
   marpe_contacts: Contact | null;
   marpe_funnel_stages: { id: string; name: string; color: string } | null;
   marpe_funnels: { id: string; name: string } | null;
@@ -37,6 +39,8 @@ interface Props {
   onUpdated: () => void;
   /** Aba aberta ao montar/trocar de negócio (ícones de acesso rápido do card) */
   initialTab?: TabKey;
+  /** Usuário logado — responsável padrão do negócio (checkpoint 14/07) */
+  currentUser?: { id: string; full_name: string };
 }
 
 const LOSS_REASONS = [
@@ -61,7 +65,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'perfil', label: 'Corp' },
 ];
 
-export default function DealPanel({ dealId, stages, onClose, onUpdated, initialTab }: Props) {
+export default function DealPanel({ dealId, stages, onClose, onUpdated, initialTab, currentUser }: Props) {
   const [deal, setDeal] = useState<Deal | null>(null);
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
@@ -307,7 +311,7 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated, initialT
       {/* Tab content (crossfade na troca de aba) */}
       <div key={activeTab} className="fade-in" style={{ flex: 1, overflowY: isConversaTab ? 'hidden' : 'auto', padding: isConversaTab ? 0 : '12px 16px', display: 'flex', flexDirection: 'column' }}>
         {activeTab === 'info' && (
-          <DealTabInfo deal={deal} onSave={handleInfoSave} />
+          <DealTabInfo deal={deal} onSave={handleInfoSave} currentUser={currentUser} />
         )}
 
         {activeTab === 'conversas' && (
