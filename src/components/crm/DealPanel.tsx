@@ -102,8 +102,8 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated, initialT
     if (el) setInk({ left: el.offsetLeft, width: el.offsetWidth });
   }, [activeTab, loading, deal]);
 
-  function load() {
-    setLoading(true);
+  function load(silent = false) {
+    if (!silent) setLoading(true);
     fetch(`/api/deals/${dealId}`)
       .then(r => r.json())
       .then(d => {
@@ -126,6 +126,44 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated, initialT
   }, []);
 
   useEffect(() => { load(); }, [dealId]);
+
+  // Refresh Corp em tempo real ao abrir o card (checkpoint 15/07): 1 GET /negocio
+  // atualiza os campos Corp-owned e o painel troca para o dado fresco sem skeleton.
+  // Se o negócio foi excluído no Corp, o deal é removido do CRM, o painel avisa
+  // e fecha, e o board recarrega.
+  const [corpDeleted, setCorpDeleted] = useState(false);
+  useEffect(() => {
+    setCorpDeleted(false);
+    if (!dealId) return;
+    let cancelled = false;
+    fetch('/api/corp/refresh-deal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deal_id: dealId }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return;
+        if (d.deleted) {
+          setCorpDeleted(true);
+          onUpdated();
+          setTimeout(() => { if (!cancelled) onClose(); }, 3000);
+        } else if (d.refreshed) {
+          load(true);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [dealId]);
+
+  const corpDeletedOverlay = corpDeleted ? (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--overlay-bg, rgba(8,10,14,0.6))', backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)' }}>
+      <div style={{ textAlign: 'center', padding: '22px 26px', maxWidth: 300 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, letterSpacing: '-0.01em' }}>Negócio excluído no Corp</div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>Este negócio foi excluído no Corp e acaba de ser removido do CRM.</div>
+      </div>
+    </div>
+  ) : null;
 
   function handleStageChange(stageId: string) {
     if (!deal || stageId === deal.stage_id) return;
@@ -188,7 +226,7 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated, initialT
   const styles: Record<string, React.CSSProperties> = {
     panel: isMobile
       ? { position: 'fixed', inset: 0, zIndex: 150, display: 'flex', flexDirection: 'column', overflowY: 'auto', border: 'none', borderRadius: 0 }
-      : { width: 420, margin: '12px 16px 16px 4px', borderRadius: 'var(--radius-xl)', display: 'flex', flexDirection: 'column', flexShrink: 0, height: 'calc(100% - 28px)', boxShadow: 'var(--shadow-panel), inset 0 1px 0 var(--highlight)', overflow: 'hidden' },
+      : { position: 'relative', width: 420, margin: '12px 16px 16px 4px', borderRadius: 'var(--radius-xl)', display: 'flex', flexDirection: 'column', flexShrink: 0, height: 'calc(100% - 28px)', boxShadow: 'var(--shadow-panel), inset 0 1px 0 var(--highlight)', overflow: 'hidden' },
     header: { padding: '16px 18px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', gap: 10 },
     closeBtn: { width: 30, height: 30, borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s var(--ease-out)', flexShrink: 0 },
   };
@@ -216,6 +254,7 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated, initialT
 
   if (!deal) return (
     <div className={panelClass} style={styles.panel}>
+      {corpDeletedOverlay}
       <div style={{ padding: 24, color: 'var(--text-muted)', fontSize: 13 }}>Negocio nao encontrado</div>
     </div>
   );
@@ -225,6 +264,7 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated, initialT
 
   return (
     <div className={panelClass} style={styles.panel}>
+      {corpDeletedOverlay}
       {/* Loss Reason Modal — portal: o painel tem backdrop-filter + overflow hidden,
           que criariam containing block / clipariam um position:fixed interno */}
       {pendingStageId && createPortal(

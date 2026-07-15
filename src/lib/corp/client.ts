@@ -104,11 +104,20 @@ export async function listNegociosAndamento(opts?: {
   return { count: data.header?.count || 0, negocios: data.negocios || data.negocios_andamento || [] };
 }
 
+// Retorna null quando o Corp responde 404 "Nenhum negócio encontrado." (probe 15/07:
+// mesma resposta para código inexistente e para negócio DELETADO — é a confirmação
+// de exclusão usada pela reconciliação). Qualquer outro erro (401/5xx/rede) propaga:
+// erro transitório NUNCA pode ser lido como "negócio não existe".
 export async function getNegocio(codigo: number): Promise<CorpNegocioDetail | null> {
-  const data = await corpFetch<{ header: { count: number }; negocio: CorpNegocioDetail[] }>('/negocio', {
-    codfil: String(CODFIL), codigo: String(codigo),
-  });
-  return data.negocio?.[0] || null;
+  try {
+    const data = await corpFetch<{ header: { count: number }; negocio: CorpNegocioDetail[] }>('/negocio', {
+      codfil: String(CODFIL), codigo: String(codigo),
+    });
+    return data.negocio?.[0] || null;
+  } catch (e) {
+    if (String(e).includes('Nenhum negócio encontrado')) return null;
+    throw e;
+  }
 }
 
 // ===== ANEXOS =====

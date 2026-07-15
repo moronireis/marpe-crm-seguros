@@ -1,0 +1,22 @@
+# Sync diurno Corp→CRM (checkpoint 15/07)
+# A cada 30 min, 8h–20h30 BRT (11–23 UTC), seg–sáb, chama o endpoint interno que roda
+# syncNegocios com detalhe + reconciliação de exclusões. Roda aqui porque o plano
+# Vercel Hobby não executa cron sub-diário (o noturno das 3h UTC segue na Vercel).
+# Disparo manual: aba Actions → Corp sync diurno → Run workflow.
+name: Corp sync diurno
+
+on:
+  schedule:
+    - cron: '*/30 11-23 * * 1-6'
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Sincroniza negócios (detalhe + reconciliação)
+        run: |
+          curl -sS -f -m 300 \
+            -H "x-webhook-key: ${{ secrets.MARPE_WEBHOOK_KEY }}" \
+            "https://marpe-crm-seguros.vercel.app/api/internal/corp-sync-negocios"

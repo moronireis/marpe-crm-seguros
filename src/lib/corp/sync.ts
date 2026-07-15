@@ -11,7 +11,7 @@ function formatPhone(ddd: number | null, numero: string | null): string | null {
   return `(${prefix}) ${clean}`;
 }
 
-function parseCorpDate(d: string | null): string | null {
+export function parseCorpDate(d: string | null): string | null {
   if (!d) return null;
   const parts = d.split('/');
   if (parts.length !== 3) return null;
@@ -24,6 +24,17 @@ export interface SyncResult {
   updated: number;
   skipped: number;
   errors: string[];
+  reconcile?: ReconcileResult;
+}
+
+export interface ReconcileResult {
+  candidates: number;       // deals neg_% ausentes da lista de andamento (ainda não marcados)
+  deleted: number;          // exclusões confirmadas no Corp e removidas do CRM
+  kept: number;             // existem no Corp mas fora de andamento (finalizados) — marcados
+  transientErrors: number;  // erros de rede/Corp — deixados para o próximo ciclo
+  aborted: string | null;   // motivo quando um trilho de segurança disparou
+  deletedDeals: Array<{ corp_id: string; title: string | null }>;
+  dryRun: boolean;
 }
 
 export async function syncClientes(): Promise<SyncResult> {
@@ -206,7 +217,8 @@ function negocioListFields(neg: CorpNegocio): Record<string, any> {
 }
 
 // Maps Corp negocio DETAIL fields → marpe_deals columns (Fase 2 fields).
-function negocioDetailFields(det: CorpNegocioDetail): Record<string, any> {
+// Exportada para o refresh por negócio do DealPanel (/api/corp/refresh-deal).
+export function negocioDetailFields(det: CorpNegocioDetail): Record<string, any> {
   return {
     comissao_pct: det.per_c || null,
     campanha: det.campanha || null,
@@ -240,7 +252,165 @@ function negocioDetailFields(det: CorpNegocioDetail): Record<string, any> {
   };
 }
 
-export async function syncNegocios(opts?: { withDetail?: boolean }): Promise<SyncResult> {
+export async function logCorpSync(sb: SupabaseClient, entry: {
+  sync_type: string; status: string; created?: number; updated?: number; skipped?: number; message?: string | null;
+}): Promise<void> {
+  await sb.from('marpe_corp_sync_log').insert({
+    sync_type: entry.sync_type,
+    status: entry.status,
+    records_created: entry.created || 0,
+    records_updated: entry.updated || 0,
+    records_skipped: entry.skipped || 0,
+    error_message: entry.message || null,
+    started_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+  });
+}
+
+// Remove do CRM um deal cujo negócio foi excluído no Corp.
+// marpe_automation_logs.deal_id tem FK SEM cascade — precisa ser anulada antes,
+// senão o DELETE falha com violação de FK. As demais tabelas deal-scoped cascateiam
+// (activities/notes/documents/installments) ou anulam (messages/surveys).
+export async function deleteCorpDeletedDeal(
+  sb: SupabaseClient,
+  deal: { id: string; corp_id: string | null; title: string | null },
+): Promise<string | null> {
+  await sb.from('marpe_automation_logs').update({ deal_id: null }).eq('deal_id', deal.id);
+  const { error } = await sb.from('marpe_deals').delete().eq('id', deal.id);
+  return error ? error.message : null;
+}
+
+// Trilhos de segurança da reconciliação: nunca deletar em massa por falha de lista.
+const RECONCILE_MAX_DELETES = 30;    // cap absoluto por ciclo
+const RECONCILE_MAX_RATIO = 0.2;     // cap relativo sobre o total de deals neg_%
+const RECONCILE_MAX_CANDIDATES = 150; // acima disso a lista está claramente quebrada
+
+// Reconciliação de exclusões Corp→CRM (checkpoint 15/07).
+// Um negócio some da lista /negocios_andamento por 2 motivos: foi EXCLUÍDO ou foi
+// FINALIZADO/movido. A confirmação individual via GET /negocio distingue:
+//   404 "Nenhum negócio encontrado."  → excluído → remove o deal do CRM
+//   200 com o negócio                 → finalizado → mantém e marca
+//     detalhes_corp.corp_fora_andamento=true para não re-consultar a cada ciclo
+//   erro transitório (401/5xx/rede)   → NÃO mexe; tenta no próximo ciclo
+async function reconcileNegocios(
+  sb: SupabaseClient,
+  corpSet: Set<string>,
+  opts: { listComplete: boolean; dryRun?: boolean },
+): Promise<ReconcileResult> {
+  const result: ReconcileResult = {
+    candidates: 0, deleted: 0, kept: 0, transientErrors: 0,
+    aborted: null, deletedDeals: [], dryRun: !!opts.dryRun,
+  };
+
+  const finish = async () => {
+    const worthLogging = result.deleted > 0 || result.aborted || result.transientErrors > 0
+      || (result.dryRun && result.deletedDeals.length > 0);
+    if (worthLogging) {
+      const parts: string[] = [];
+      if (result.dryRun) parts.push('[DRY-RUN — nada foi removido]');
+      if (result.deletedDeals.length) {
+        parts.push(`Excluídos no Corp${result.dryRun ? ' (seriam removidos)' : ', removidos do CRM'}: ` +
+          result.deletedDeals.map(d => `${d.corp_id} (${d.title || 'sem título'})`).join('; '));
+      }
+      if (result.transientErrors) parts.push(`${result.transientErrors} não verificados por erro transitório`);
+      await logCorpSync(sb, {
+        sync_type: 'negocios_reconcile',
+        status: result.aborted ? 'failed' : (result.transientErrors ? 'partial' : 'success'),
+        updated: result.kept,
+        skipped: result.transientErrors,
+        message: result.aborted || parts.join(' | ') || null,
+      });
+    }
+    return result;
+  };
+
+  if (!opts.listComplete) {
+    result.aborted = 'Lista /negocios_andamento incompleta (paginação) — reconciliação pulada por segurança';
+    return finish();
+  }
+
+  // Todos os deals de negócio sincronizados + flag "já sei que está fora de andamento"
+  const rows: Array<{ id: string; corp_id: string; title: string | null; fora: boolean | null }> = [];
+  const PAGE_SIZE = 1000;
+  for (let page = 0; ; page++) {
+    const { data, error } = await sb.from('marpe_deals')
+      .select('id, corp_id, title, fora:detalhes_corp->corp_fora_andamento')
+      .like('corp_id', 'neg_%')
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    if (error) { result.aborted = `Falha ao carregar deals: ${error.message}`; return finish(); }
+    rows.push(...((data || []) as any));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+
+  const candidates = rows.filter(r => !corpSet.has(r.corp_id) && r.fora !== true);
+  result.candidates = candidates.length;
+  if (candidates.length === 0) return finish();
+
+  if (candidates.length > RECONCILE_MAX_CANDIDATES) {
+    result.aborted = `${candidates.length} deals fora da lista de andamento (limite ${RECONCILE_MAX_CANDIDATES}) — lista do Corp suspeita, nada verificado`;
+    return finish();
+  }
+
+  // Confirmação individual em lotes pequenos (rate-limit friendly)
+  const confirmedDeleted: typeof candidates = [];
+  const keptDeals: typeof candidates = [];
+  const BATCH = 5;
+  for (let i = 0; i < candidates.length; i += BATCH) {
+    const batch = candidates.slice(i, i + BATCH);
+    const checks = await Promise.all(batch.map(async c => {
+      const m = c.corp_id.match(/(\d+)$/);
+      if (!m) return { c, state: 'error' as const };
+      try {
+        const detail = await getNegocio(parseInt(m[1], 10));
+        return { c, state: detail === null ? ('deleted' as const) : ('kept' as const) };
+      } catch {
+        return { c, state: 'error' as const };
+      }
+    }));
+    for (const { c, state } of checks) {
+      if (state === 'deleted') confirmedDeleted.push(c);
+      else if (state === 'kept') keptDeals.push(c);
+      else result.transientErrors++;
+    }
+  }
+
+  // Caps: acima do limite, não remove NADA neste ciclo
+  const ratioCap = Math.ceil(rows.length * RECONCILE_MAX_RATIO);
+  if (confirmedDeleted.length > RECONCILE_MAX_DELETES || confirmedDeleted.length > ratioCap) {
+    result.aborted = `${confirmedDeleted.length} exclusões confirmadas excedem o limite de segurança (${Math.min(RECONCILE_MAX_DELETES, ratioCap)}) — nenhuma remoção executada; verificar manualmente`;
+    return finish();
+  }
+
+  // Marca os finalizados para não re-consultar a cada ciclo (merge no jsonb).
+  // Deals fora de andamento não são tocados pelo sync de upsert, então a flag persiste.
+  if (!opts.dryRun) {
+    for (const k of keptDeals) {
+      const { data: cur } = await sb.from('marpe_deals').select('detalhes_corp').eq('id', k.id).maybeSingle();
+      await sb.from('marpe_deals')
+        .update({ detalhes_corp: { ...(cur?.detalhes_corp || {}), corp_fora_andamento: true } })
+        .eq('id', k.id);
+      result.kept++;
+    }
+  } else {
+    result.kept = keptDeals.length;
+  }
+
+  for (const d of confirmedDeleted) {
+    result.deletedDeals.push({ corp_id: d.corp_id, title: d.title });
+    if (opts.dryRun) continue;
+    const err = await deleteCorpDeletedDeal(sb, d);
+    if (err) result.transientErrors++;
+    else result.deleted++;
+  }
+
+  return finish();
+}
+
+export async function syncNegocios(opts?: {
+  withDetail?: boolean;
+  reconcile?: boolean;       // default true — desligar apenas em cenários de teste
+  reconcileDryRun?: boolean; // valida a reconciliação sem remover nada
+}): Promise<SyncResult> {
   const withDetail = opts?.withDetail !== false; // default true
   const sb = createServerClient();
   const result: SyncResult = { type: 'negocios', created: 0, updated: 0, skipped: 0, errors: [] };
@@ -326,6 +496,17 @@ export async function syncNegocios(opts?: { withDetail?: boolean }): Promise<Syn
       if (error) result.errors.push(`Insert neg ${neg.codigo}: ${error.message}`);
       else result.created++;
     }
+  }
+
+  // Reconciliação de exclusões: negócio que saiu da lista de andamento é verificado
+  // individualmente e, se confirmado excluído no Corp, removido do CRM (com trilhos
+  // de segurança). listComplete protege contra paginação truncada → deleção em massa.
+  if (opts?.reconcile !== false) {
+    const corpSet = new Set(allNegocios.map(n => `neg_${n.codfil}_${n.codigo}`));
+    result.reconcile = await reconcileNegocios(sb, corpSet, {
+      listComplete: allNegocios.length >= total,
+      dryRun: opts?.reconcileDryRun,
+    });
   }
 
   return result;
