@@ -281,9 +281,13 @@ export async function deleteCorpDeletedDeal(
 }
 
 // Trilhos de segurança da reconciliação: nunca deletar em massa por falha de lista.
+// A proteção REAL contra deleção em massa é a confirmação individual via GET /negocio
+// + o cap de exclusões; o teto de candidatos é só sanidade contra lista ensandecida.
+// (Primeira execução 15/07: 195 candidatos históricos — finalizados desde 02/07 que
+// nunca foram reconciliados; após a primeira passada o regime é ~0-5 por ciclo.)
 const RECONCILE_MAX_DELETES = 30;    // cap absoluto por ciclo
 const RECONCILE_MAX_RATIO = 0.2;     // cap relativo sobre o total de deals neg_%
-const RECONCILE_MAX_CANDIDATES = 150; // acima disso a lista está claramente quebrada
+const RECONCILE_MAX_CANDIDATES = 400; // acima disso a lista está claramente quebrada
 
 // Reconciliação de exclusões Corp→CRM (checkpoint 15/07).
 // Um negócio some da lista /negocios_andamento por 2 motivos: foi EXCLUÍDO ou foi
