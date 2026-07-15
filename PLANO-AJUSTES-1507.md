@@ -2,7 +2,7 @@
 
 > Última atualização: 15/07/2026
 > Origem: feedback Marpe 15/07 (mensagem + PDF "Marpe - Ajustes.pdf" + PDF "Marpe - Ajustes Módulo Inbox.pdf")
-> Status: PLANEJADO — aguardando OK para execução
+> Status: **S1 EM PRODUÇÃO (15/07, E2E completo)** — S2 e S3 planejados
 
 ---
 
@@ -115,6 +115,20 @@ Nova função `reconcileNegocios` em `src/lib/corp/sync.ts`, executada após o u
 ### S1.4 — Board atualiza após o sync-light
 
 Hoje o board dispara o sync e ignora o resultado. Ajuste no `CrmBoard`: quando o POST retorna `synced: true` com `created + updated > 0` (ou remoções do S1.2), refazer o fetch de deals — a mesma sessão que disparou o sync vê o resultado sem F5.
+
+### ✅ S1 — EXECUTADO EM 15/07 (commits d098cc1 + ad86005, prod + E2E)
+
+Registro do que a execução revelou/ajustou em relação ao planejado:
+
+- **Backup prévio**: dump das tabelas deal-scoped em `~/Backups/marpe-crm/2026-07-15/` (4.701 deals) + repo pushed.
+- **Probe S1.0**: `GET /negocio` inexistente/deletado → **404 `"Nenhum negócio encontrado."`** (idêntico nos 2 casos) — essa é a confirmação de exclusão; qualquer outro erro é transitório e nunca remove.
+- **Plano Vercel = Hobby confirmado** (via API) → cron diurno roda no **GitHub Actions** (`.github/workflows/corp-sync-diurno.yml`, `*/30 11-23 UTC seg–sáb`, secret `MARPE_WEBHOOK_KEY`). Testado via workflow_dispatch: success.
+- **S1.4 já existia**: o CrmBoard já recarregava os deals quando o sync-light retornava `synced:true` — item riscado sem código novo.
+- **Notificação de exclusão**: `marpe_notifications` é tabela morta (nenhuma UI a lê). A trilha visível é o **corp_sync_log**, exibido na página Config — cada remoção é registrada lá com corp_id + título (tipo `negocios_reconcile`).
+- **Bug latente corrigido**: as CHECK constraints de `marpe_corp_sync_log` rejeitavam os valores que o código sempre usou — **todo log de sync falhou silenciosamente desde o início** (tabela vazia em prod). Migração 20260715 removeu as CHECKs; o log passou a funcionar (inclusive para o cron noturno).
+- **FK sem cascade**: `marpe_automation_logs.deal_id` — anulada antes do delete (senão a remoção falharia).
+- **Primeira reconciliação (backlog histórico)**: 195 candidatos acumulados desde 02/07 → 160 finalizados marcados (`corp_fora_andamento`) e **34 exclusões confirmadas removidas** (incluindo o deal de teste neg_1_7588). Teto de candidatos recalibrado 150→400 (a proteção real é a confirmação individual + cap de 30 exclusões/ciclo). Regime permanente atingido no mesmo dia: 4 candidatos/ciclo.
+- **E2E completo em prod**: negócio descartável criado no Corp → sync criou o deal → `refresh-deal` (vivo) `refreshed:true` → DELETE no Corp → `refresh-deal` detectou e removeu o deal → verificado ausente. Todos os passos OK.
 
 ---
 
@@ -266,9 +280,9 @@ Ordem: **S1 → S2 → S3**. S1 primeiro porque é o comportamento que o cliente
 
 ## 9. Critérios de aceite
 
-- [ ] Alteração feita no Corp reflete no CRM em ≤30 min sem ação manual; ao abrir o card, reflete imediatamente
-- [ ] Exclusão no Corp remove o card do CRM em ≤30 min, com registro no log de sync e notificação in-app
-- [ ] Negócio finalizado no Corp **não** é excluído do CRM pela reconciliação
+- [x] Alteração feita no Corp reflete no CRM em ≤30 min sem ação manual; ao abrir o card, reflete imediatamente *(S1 em prod 15/07; validado por E2E)*
+- [x] Exclusão no Corp remove o card do CRM em ≤30 min, com registro no corp_sync_log (visível na Config) *(S1 em prod 15/07; 34 históricos + E2E)*
+- [x] Negócio finalizado no Corp **não** é excluído do CRM pela reconciliação *(160 finalizados verificados e mantidos)*
 - [ ] Aba "Corp" ausente do painel do negócio
 - [ ] Board abre ordenado por "Mais recentes"
 - [ ] Campo "Número da Apólice" ausente dos formulários (leitura mantém valor sincronizado quando existir)
