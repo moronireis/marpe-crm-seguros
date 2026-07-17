@@ -2,7 +2,8 @@
 
 > Última atualização: 17/07/2026
 > Origem: feedback Marpe 15/07 (mensagem + 2 PDFs) + **board u4digital** (github.com/orgs/u4digital/projects/3, 26 issues em u4digital/Marpe-Project, mapeadas 17/07)
-> Status: **S1 EM PRODUÇÃO (15/07, E2E completo)** — S2, S3 e S4 planejados
+> Status: **TUDO EM PRODUÇÃO (17/07)** — S1 (15/07) + Hotfix/S2/S3/S4 (17/07) executados e validados.
+> Entrega e roteiro de testes: **RELATORIO-EXECUCAO-1707.md**. Pendentes: propostas P-A/P-B/P-C (aguardam OK).
 
 ---
 
