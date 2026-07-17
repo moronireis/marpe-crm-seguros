@@ -5,7 +5,6 @@ import DealTabConversas from './DealTabConversas';
 import DealTabAtividades from './DealTabAtividades';
 import DealTabAnotacoes from './DealTabAnotacoes';
 import DealTabDocumentos from './DealTabDocumentos';
-import DealTabPerfil from './DealTabPerfil';
 
 interface Stage { id: string; name: string; color: string; sort_order: number; is_terminal?: boolean; terminal_type?: string | null; }
 interface Contact { id: string; name: string; phone: string | null; email: string | null; city: string | null; tags: string[]; corp_id: string | null; }
@@ -54,7 +53,8 @@ const LOSS_REASONS = [
   'Outro',
 ];
 
-type TabKey = 'info' | 'conversas' | 'atividades' | 'anotacoes' | 'documentos' | 'perfil';
+// Aba "Corp" (perfil) removida a pedido do cliente — checkpoint 15/07, issue #9
+type TabKey = 'info' | 'conversas' | 'atividades' | 'anotacoes' | 'documentos';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'info', label: 'Info' },
@@ -62,7 +62,6 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'atividades', label: 'Atividades' },
   { key: 'anotacoes', label: 'Notas' },
   { key: 'documentos', label: 'Docs' },
-  { key: 'perfil', label: 'Corp' },
 ];
 
 export default function DealPanel({ dealId, stages, onClose, onUpdated, initialTab, currentUser }: Props) {
@@ -381,10 +380,6 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated, initialT
             dealCorpId={deal.corp_id}
             contactCorpId={deal.marpe_contacts?.corp_id ?? null}
           />
-        )}
-
-        {activeTab === 'perfil' && (
-          <DealTabPerfil corpId={deal.corp_id} dealId={dealId} />
         )}
       </div>
     </div>

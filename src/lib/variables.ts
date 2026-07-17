@@ -31,6 +31,14 @@ export interface InterpolationContext {
     vigencia_inicio?: string | null;
     vigencia_fim?: string | null;
     next_action?: string | null;
+    // Sinistros (S4.2, issue #18): campos vindos do sync de sinistros do Corp
+    detalhes_corp?: {
+      numsin?: string | null;
+      situacao?: string | null;
+      franquia?: number | string | null;
+      oficina?: string | null;
+      datoco?: string | null;
+    } | null;
   };
 }
 
@@ -99,6 +107,15 @@ export function interpolateVariables(
     vigencia_inicio: formatDate(deal?.vigencia_inicio),
     vigencia_fim: formatDate(deal?.vigencia_fim),
     proxima_acao: str(deal?.next_action),
+
+    // ── Sinistro (S4.2, issue #18) ─────────────────────────────────────────
+    numero_sinistro: str(deal?.detalhes_corp?.numsin as string | null),
+    situacao_sinistro: str(deal?.detalhes_corp?.situacao as string | null),
+    franquia: formatBRL(deal?.detalhes_corp?.franquia),
+    oficina: str(deal?.detalhes_corp?.oficina as string | null),
+    data_ocorrencia: deal?.detalhes_corp?.datoco
+      ? String(deal.detalhes_corp.datoco)
+      : '—',
 
     // ── Computed ───────────────────────────────────────────────────────────
     periodo_dia: periodoDia(),

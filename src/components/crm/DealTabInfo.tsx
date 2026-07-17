@@ -192,7 +192,9 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
           <div style={s.row}><span style={s.label}>Tipo</span><span style={s.value}>{DEAL_TYPES[deal.deal_type || ''] || '—'}</span></div>
           <div style={s.row}><span style={s.label}>Ramo</span><span style={s.value}>{deal.ramo || '—'}</span></div>
           <div style={s.row}><span style={s.label}>Seguradora</span><span style={s.value}>{deal.seguradora || '—'}</span></div>
-          <div style={s.row}><span style={s.label}>Apólice</span><span style={s.value}>{deal.apolice || '—'}</span></div>
+          {/* Apólice: campo removido dos formulários (issue #11); exibe apenas
+              quando veio preenchida do sync de apólices do Corp */}
+          {deal.apolice && <div style={s.row}><span style={s.label}>Apólice</span><span style={s.value}>{deal.apolice}</span></div>}
           {deal.campanha && <div style={s.row}><span style={s.label}>Campanha</span><span style={s.value}>{deal.campanha}</span></div>}
           <div style={s.row}><span style={s.label}>Responsável</span><span style={s.value}>{deal.marpe_profiles?.full_name || '—'}</span></div>
           <div style={s.row}><span style={s.label}>Vigência Início</span><span style={s.value}>{displayDate(deal.vigencia_inicio)}</span></div>
@@ -284,10 +286,6 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
         <div style={{ marginTop: 8 }}>
           <label style={s.label}>Seguradora</label>
           {corpSelect('seguradora', lookups?.seguradoras, 'Ex: Porto Seguro')}
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <label style={s.label}>Apólice</label>
-          <input value={form.apolice} onChange={field('apolice')} placeholder="Número da apólice" style={s.input} />
         </div>
         <div style={{ marginTop: 8 }}>
           <label style={s.label}>Campanha</label>

@@ -50,7 +50,7 @@ export const GET: APIRoute = async ({ locals }) => {
   // 5 é o default validado no POST /negocio — garante pelo menos uma opção
   const bases_repasse = [...new Set([5, ...basesFound])].sort((a, b) => a - b);
 
-  const body = JSON.stringify({
+  const payload = {
     ramos: ok(ramos, [] as Awaited<ReturnType<typeof listRamos>>),
     seguradoras: ok(seguradoras, [] as Awaited<ReturnType<typeof listSeguradoras>>),
     produtores: ok(produtores, [] as Awaited<ReturnType<typeof listProdutores>>),
@@ -64,7 +64,31 @@ export const GET: APIRoute = async ({ locals }) => {
       { codigo: 2, nome: 'Renovação', deal_type: 'renovacao' },
       { codigo: 3, nome: 'Resgate', deal_type: 'resgate' },
     ],
-  });
-  cache = { at: Date.now(), body };
-  return new Response(body, { status: 200 });
+  };
+
+  // Cache persistente stale-while-revalidate (issue #13): quando o Corp falha
+  // (token/instabilidade), serve o último resultado bom gravado em marpe_settings —
+  // era a causa do campo Seguradora degradar para texto livre no modal.
+  const corpOk = payload.seguradoras.length > 0 && payload.ramos.length > 0;
+  if (corpOk) {
+    const body = JSON.stringify(payload);
+    cache = { at: Date.now(), body };
+    sb.from('marpe_settings').upsert({
+      key: 'corp_lookups_cache',
+      value: payload,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'key' }).then(null, () => {});
+    return new Response(body, { status: 200 });
+  }
+
+  const { data: cached } = await sb.from('marpe_settings')
+    .select('value').eq('key', 'corp_lookups_cache').maybeSingle();
+  if (cached?.value?.seguradoras?.length) {
+    const body = JSON.stringify({ ...cached.value, stale: true });
+    cache = { at: Date.now(), body };
+    return new Response(body, { status: 200 });
+  }
+
+  // Sem Corp e sem cache — devolve o que houver (listas derivadas ainda ajudam)
+  return new Response(JSON.stringify(payload), { status: 200 });
 };

@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
+import { validPhone, validEmail } from '../../../lib/masks';
 import { createCliente, createTelefone, createEndereco, createEmail, deleteCliente } from '../../../lib/corp/client';
 
 export const prerender = false;
@@ -45,7 +46,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
 
   let query = sb
     .from('marpe_contacts')
-    .select('id, name, phone, email, city, corp_id, tags, source, photo_url')
+    .select('id, name, phone, email, city, corp_id, tags, source, photo_url, inbox_read_at, pinned, conv_status')
     .in('id', contactIds);
 
   if (search) {
@@ -93,6 +94,14 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   if (!body.name) {
     return new Response(JSON.stringify({ error: 'name required' }), { status: 400 });
+  }
+
+  // Validação de tipos no server (issue #12): telefone 10-11 dígitos, e-mail com formato
+  if (!validPhone(String(body.phone || ''))) {
+    return new Response(JSON.stringify({ error: 'Telefone inválido — use DDD + número (10 ou 11 dígitos).' }), { status: 400 });
+  }
+  if (!validEmail(String(body.email || ''))) {
+    return new Response(JSON.stringify({ error: 'E-mail inválido.' }), { status: 400 });
   }
 
   // Corp-integrated creation (botão Novo Cliente): grava no Corp PRIMEIRO, depois no

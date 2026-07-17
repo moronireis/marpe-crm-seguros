@@ -398,6 +398,24 @@ export const POST: APIRoute = async ({ request }) => {
   let finalMime: string | null = rawMime;
   let finalContentType = contentType;
 
+  // Upload com retry: o storage da Cloudfy falha INTERMITENTE com "violates row-level
+  // security policy" (réplicas com config inconsistente — diagnóstico 17/07: sucesso e
+  // falha intercalados no mesmo minuto com pipeline idêntico). 2 tentativas extras
+  // com backoff resolvem na prática.
+  async function uploadWithRetry(path: string, bytes: Buffer, contentType2: string): Promise<{ url: string | null; error: string | null }> {
+    let lastErr: string | null = null;
+    for (let i = 0; i < 3; i++) {
+      const { error } = await sb.storage.from('marpe-media').upload(path, bytes, { contentType: contentType2, upsert: true });
+      if (!error) {
+        const { data } = sb.storage.from('marpe-media').getPublicUrl(path);
+        return { url: data.publicUrl, error: null };
+      }
+      lastErr = error.message;
+      if (i < 2) await new Promise(r => setTimeout(r, 350 * (i + 1)));
+    }
+    return { url: null, error: lastErr };
+  }
+
   // ── Step 1: If UazapiGO sent base64 inline, we'll upload it in Step 4
   let resolvedBase64: string | null = base64Data;
   let resolvedMimeFromDownload: string | null = null;
@@ -455,64 +473,55 @@ export const POST: APIRoute = async ({ request }) => {
         const uploadMime = mimeToUse.split(';')[0].trim();
 
         await sb.storage.createBucket('marpe-media', { public: true, fileSizeLimit: 52428800 }).catch(() => {});
-        const { error: uploadErr } = await sb.storage
-          .from('marpe-media')
-          .upload(filePath, mediaBytes, { contentType: uploadMime, upsert: true });
-
-        if (!uploadErr) {
-          const { data: urlData } = sb.storage.from('marpe-media').getPublicUrl(filePath);
-          finalMediaUrl = urlData.publicUrl;
+        const up = await uploadWithRetry(filePath, mediaBytes, uploadMime);
+        if (up.url) {
+          finalMediaUrl = up.url;
           mediaDebug.upload_ok = true;
         } else {
-          mediaDebug.upload_error = uploadErr.message;
-          finalMediaUrl = rawMediaUrl;
+          mediaDebug.upload_error = up.error;
+          // NUNCA gravar a URL crua do CDN do WhatsApp: expira E o conteúdo é
+          // criptografado (AES) — no front vira link morto. media_url null → o
+          // front usa o proxy /api/media/download, que se auto-cura via UazapiGO.
+          finalMediaUrl = null;
         }
       } else {
         mediaDebug.cdn_error = `HTTP ${cdnRes.status}`;
-        finalMediaUrl = rawMediaUrl;
+        finalMediaUrl = null;
       }
     } catch (err: any) {
       mediaDebug.fetch_error = String(err?.message || err);
-      finalMediaUrl = rawMediaUrl;
+      finalMediaUrl = null;
     }
   }
 
-  // ── Step 3: If no CDN URL and no base64, try UazapiGO download API (rarely succeeds)
+  // ── Step 3: fallback via UazapiGO POST /message/download (rota REAL, validada 17/07:
+  // devolve { fileURL, mimetype } com o arquivo já descriptografado no servidor UazapiGO)
   if ((isMedia || isGenericMedia) && !resolvedBase64 && !finalMediaUrl && messageId) {
     try {
-      const downloadEndpoints = [
-        { method: 'GET', url: `${UAZAPI_URL}/download/base64?token=${UAZAPI_TOKEN}&messageId=${encodeURIComponent(messageId)}` },
-        { method: 'POST', url: `${UAZAPI_URL}/download/base64?token=${UAZAPI_TOKEN}`, body: JSON.stringify({ messageId }) },
-      ];
-
-      for (const ep of downloadEndpoints) {
-        try {
-          const opts: RequestInit = {
-            method: ep.method,
-            headers: { 'Content-Type': 'application/json', 'token': UAZAPI_TOKEN },
-            ...(ep.body ? { body: ep.body } : {}),
-          };
-          const dlRes = await fetch(ep.url, opts);
-          if (!dlRes.ok) continue;
-
-          const dlData = await dlRes.json().catch(() => null);
-          if (!dlData) continue;
-
-          const b64 = dlData.base64 || dlData.data || dlData.file || null;
-          const mime = dlData.mimetype || dlData.mime || dlData.type || null;
-
-          if (b64) {
-            resolvedBase64 = b64;
-            resolvedMimeFromDownload = mime;
-            if (mime && isGenericMedia) {
-              finalContentType = detectContentType('', mime.toLowerCase());
-              finalMime = mime;
+      const dlRes = await fetch(`${UAZAPI_URL}/message/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', token: UAZAPI_TOKEN },
+        body: JSON.stringify({ id: messageId }),
+      });
+      if (dlRes.ok) {
+        const dlData: any = await dlRes.json().catch(() => null);
+        if (dlData?.fileURL) {
+          const fileRes = await fetch(dlData.fileURL);
+          if (fileRes.ok) {
+            const buf = Buffer.from(await fileRes.arrayBuffer());
+            resolvedBase64 = buf.toString('base64');
+            resolvedMimeFromDownload = dlData.mimetype || fileRes.headers.get('content-type') || null;
+            if (resolvedMimeFromDownload && isGenericMedia) {
+              finalContentType = detectContentType('', resolvedMimeFromDownload.toLowerCase());
+              finalMime = resolvedMimeFromDownload;
             }
-            break;
+            mediaDebug.step3_uazapi_ok = true;
           }
-        } catch (_) { continue; }
+        }
+      } else {
+        mediaDebug.step3_status = dlRes.status;
       }
-    } catch (_) { /* Download failed */ }
+    } catch (_) { /* segue sem mídia; o proxy self-healing resolve na visualização */ }
   }
 
   // ── Step 4: Upload to Supabase Storage if we have base64 (inline or from UazapiGO API)
@@ -526,14 +535,12 @@ export const POST: APIRoute = async ({ request }) => {
 
       await sb.storage.createBucket('marpe-media', { public: true, fileSizeLimit: 52428800 }).catch(() => {});
 
-      const { error: uploadErr } = await sb.storage
-        .from('marpe-media')
-        .upload(filePath, buffer, { contentType: uploadMime, upsert: true });
-
-      if (!uploadErr) {
-        const { data: urlData } = sb.storage.from('marpe-media').getPublicUrl(filePath);
-        finalMediaUrl = urlData.publicUrl;
+      const up = await uploadWithRetry(filePath, buffer, uploadMime);
+      if (up.url) {
+        finalMediaUrl = up.url;
         finalMime = mimeToUse;
+      } else {
+        mediaDebug.step4_upload_error = up.error;
       }
     } catch (_) {
       // Storage upload failed — frontend will use proxy endpoint with wa_message_id
@@ -570,6 +577,14 @@ export const POST: APIRoute = async ({ request }) => {
       } : {}),
     },
   });
+
+  // S3.8: conversa finalizada reabre sozinha quando o cliente manda mensagem nova
+  if (!isGroup && !fromMe) {
+    await sb.from('marpe_contacts')
+      .update({ conv_status: 'open' })
+      .eq('id', contactId)
+      .eq('conv_status', 'closed');
+  }
 
   // ── Chatbot de primeiro atendimento ─────────────────────────────────────────
   // Only fires for individual inbound text messages (not groups, not fromMe).

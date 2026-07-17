@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { DndContext, DragOverlay, useDroppable, useDraggable, PointerSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent } from '@dnd-kit/core';
 import DealPanel from './DealPanel';
 import NewContactModal from './NewContactModal';
+import { clampPct } from '../../lib/masks';
 
 // ─── Shared input styles ──────────────────────────────────────────────────────
 const INPUT_S: React.CSSProperties = {
@@ -159,6 +160,7 @@ interface NewDealForm {
   contact_id: string;
   ramo: string; seguradora: string; deal_type: string;
   premio: string; comissao_pct: string; pct_repasse: string;
+  comissao_valor: string; valor_repasse: string;
   next_action: string; next_action_date: string;
   // New fields
   campanha: string; ja_possui_produto: boolean;
@@ -169,6 +171,7 @@ interface NewDealForm {
 const EMPTY_FORM: NewDealForm = {
   contact_id: '', ramo: '', seguradora: '', deal_type: 'prospeccao',
   premio: '', comissao_pct: '', pct_repasse: '',
+  comissao_valor: '', valor_repasse: '',
   next_action: '', next_action_date: '',
   campanha: '', ja_possui_produto: false,
   seguradora_atual: '', vigencia_atual_fim: '', corretora_atual: '',
@@ -201,7 +204,12 @@ interface FilterState {
   produtor: string[];
   tipo: string[];
   status: string[];
-  dateRange: 'todos' | 'hoje' | 'proximos7';
+  // Presets do filtro "Próxima Ação" do Corp (issue #20):
+  // Todas / Hoje / Esta Semana / Este Mês / Próximos / Atraso de N dias / Personalizado
+  dateRange: 'todos' | 'hoje' | 'semana' | 'mes' | 'proximos' | 'atraso' | 'custom';
+  atrasoDias: string;
+  proxFrom: string;
+  proxTo: string;
   premioMin: string;
   premioMax: string;
   createdFrom: string;
@@ -209,7 +217,8 @@ interface FilterState {
 }
 const EMPTY_FILTERS: FilterState = {
   responsavel: [], etapa: [], ramo: [], seguradora: [], produtor: [], tipo: [], status: [],
-  dateRange: 'todos', premioMin: '', premioMax: '', createdFrom: '', createdTo: '',
+  dateRange: 'todos', atrasoDias: '7', proxFrom: '', proxTo: '',
+  premioMin: '', premioMax: '', createdFrom: '', createdTo: '',
 };
 
 function countActiveFilters(f: FilterState): number {
@@ -432,6 +441,155 @@ function MultiSelectFilter({
   );
 }
 
+// ─── NewSinistroModal (S4.1, issue #27) ──────────────────────────────────────
+// Registro manual de sinistro no funil Sinistros. Não grava no Corp (a CorpAPI
+// não tem rota de escrita de sinistro confirmada) — skip_corp evita o dual-write.
+// A apólice vem dos deals doc_% do contato selecionado (sync de apólices).
+function NewSinistroModal({ funnels, activeFunnelId, onClose, onCreated }: {
+  funnels: Funnel[]; activeFunnelId: string; onClose: () => void; onCreated: () => void;
+}) {
+  const [contactSearch, setContactSearch] = useState('');
+  const [contactOptions, setContactOptions] = useState<ContactOption[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [contactId, setContactId] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [apolices, setApolices] = useState<{ id: string; apolice: string | null; ramo: string | null; seguradora: string | null }[]>([]);
+  const [form, setForm] = useState({ apoliceIdx: '', numsin: '', descricao: '', next_action: '', next_action_date: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const firstStageId = funnels.find(f => f.id === activeFunnelId)?.stages
+    ?.slice().sort((a, b) => a.sort_order - b.sort_order).find(s => !s.is_terminal)?.id || '';
+
+  useEffect(() => {
+    if (contactSearch.length < 2 || contactId) { setContactOptions([]); setShowDropdown(false); return; }
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      fetch(`/api/contacts/search?search=${encodeURIComponent(contactSearch)}&limit=15`)
+        .then(r => r.json())
+        .then(d => { setContactOptions(d.contacts || []); setShowDropdown(true); })
+        .catch(() => {});
+    }, 250);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [contactSearch, contactId]);
+
+  async function pickContact(c: ContactOption) {
+    setContactId(c.id);
+    setContactName(c.name);
+    setContactSearch(c.name);
+    setShowDropdown(false);
+    // Apólices emitidas do contato (deals doc_% via consulta do sync)
+    try {
+      const r = await fetch(`/api/contacts/${c.id}`);
+      const d = await r.json();
+      const docs = (d.deals || []).filter((dl: any) => dl.corp_id?.startsWith('doc_'));
+      setApolices(docs.map((dl: any) => ({ id: dl.id, apolice: dl.apolice, ramo: dl.ramo, seguradora: dl.seguradora })));
+    } catch { setApolices([]); }
+  }
+
+  async function handleSubmit() {
+    setError('');
+    if (!contactId) { setError('Selecione o contato/segurado.'); return; }
+    if (!activeFunnelId || !firstStageId) { setError('Funil Sinistros sem etapas.'); return; }
+    setSubmitting(true);
+    const ap = form.apoliceIdx !== '' ? apolices[parseInt(form.apoliceIdx)] : null;
+    const res = await fetch('/api/deals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        skip_corp: true,
+        contact_id: contactId,
+        funnel_id: activeFunnelId,
+        stage_id: firstStageId,
+        title: `SINISTRO ${ap?.ramo?.toUpperCase() || ''} — ${contactName}`.trim(),
+        ramo: ap?.ramo || null,
+        seguradora: ap?.seguradora || null,
+        apolice: ap?.apolice || null,
+        next_action: form.next_action || 'Acompanhar sinistro',
+        next_action_date: form.next_action_date || null,
+        observacoes_proposta: form.descricao || null,
+        detalhes_corp: { numsin: form.numsin || null, situacao: 'ABERTO', descricao: form.descricao || null, registrado_no_crm: true },
+      }),
+    });
+    const data = await res.json();
+    setSubmitting(false);
+    if (!res.ok) { setError(data.error || 'Erro ao registrar sinistro.'); return; }
+    onCreated();
+    onClose();
+  }
+
+  return (
+    <div className="overlay-glass" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="glass-modal modal-pop" style={{ borderRadius: 'var(--radius-xl)', width: 470, maxWidth: 'calc(100vw - 32px)', maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>Registrar Sinistro</span>
+          <button onClick={onClose} aria-label="Fechar" style={{ width: 30, height: 30, borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div style={{ padding: 20, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ position: 'relative' }}>
+            <label style={LABEL_S}>Segurado *</label>
+            <input value={contactSearch}
+              onChange={e => { setContactSearch(e.target.value); setContactId(''); }}
+              placeholder="Buscar contato..." style={INPUT_S} />
+            {showDropdown && contactOptions.length > 0 && (
+              <div className="glass-modal" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, borderRadius: 12, maxHeight: 200, overflowY: 'auto', marginTop: 4 }}>
+                {contactOptions.map(c => (
+                  <div key={c.id} onClick={() => pickContact(c)}
+                    style={{ padding: '8px 13px', cursor: 'pointer', fontSize: 13, transition: 'background 0.15s' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                    {c.name}{c.phone ? <span style={{ color: 'var(--text-muted)', fontSize: 11 }}> · {c.phone}</span> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <label style={LABEL_S}>Apólice</label>
+            <select value={form.apoliceIdx} onChange={e => setForm(f => ({ ...f, apoliceIdx: e.target.value }))} disabled={!contactId} style={{ ...INPUT_S, cursor: 'pointer', opacity: contactId ? 1 : 0.6 }}>
+              <option value="">{contactId ? (apolices.length ? '— Selecione a apólice —' : 'Sem apólices sincronizadas') : 'Selecione o segurado primeiro'}</option>
+              {apolices.map((a, i) => (
+                <option key={a.id} value={String(i)}>{(a.ramo || '').toUpperCase()} · {a.seguradora || '—'} · {a.apolice || 'sem número'}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={LABEL_S}>Número do Sinistro</label>
+            <input value={form.numsin} onChange={e => setForm(f => ({ ...f, numsin: e.target.value }))} placeholder="Ex: 22806374" style={INPUT_S} />
+          </div>
+          <div>
+            <label style={LABEL_S}>Descrição da Ocorrência</label>
+            <textarea value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} rows={3} placeholder="O que aconteceu..." style={{ ...INPUT_S, resize: 'vertical', minHeight: 60 }} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <label style={LABEL_S}>Próxima Ação</label>
+              <input value={form.next_action} onChange={e => setForm(f => ({ ...f, next_action: e.target.value }))} placeholder="Acompanhar sinistro" style={INPUT_S} />
+            </div>
+            <div>
+              <label style={LABEL_S}>Data</label>
+              <input type="date" value={form.next_action_date} onChange={e => setForm(f => ({ ...f, next_action_date: e.target.value }))} style={INPUT_S} />
+            </div>
+          </div>
+          {error && (
+            <div style={{ fontSize: 12, color: '#f87171', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '8px 12px' }}>{error}</div>
+          )}
+        </div>
+        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--hairline)', display: 'flex', gap: 10, justifyContent: 'flex-end', flexShrink: 0 }}>
+          <button type="button" onClick={onClose} style={{ padding: '8px 18px', borderRadius: 10, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>Cancelar</button>
+          <button type="button" onClick={handleSubmit} disabled={submitting || !contactId}
+            style={{ padding: '8px 20px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.18)', background: (!submitting && contactId) ? 'linear-gradient(180deg, #4F8FF7, #2E6BE6)' : 'rgba(59,130,246,0.25)', color: (!submitting && contactId) ? '#fff' : 'var(--text-muted)', fontSize: 13, fontWeight: 600, cursor: (!submitting && contactId) ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>
+            {submitting ? 'Registrando...' : 'Registrar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── NewDealModal ─────────────────────────────────────────────────────────────
 function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser }: {
   funnels: Funnel[]; activeFunnelId: string;
@@ -448,6 +606,21 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
   const [lookups, setLookups] = useState<CorpLookups | null>(null);
   // Campanha: '' | 'nome:X' | 'cod:16' | '__livre' (texto em form.campanha)
   const [campanhaChoice, setCampanhaChoice] = useState('');
+  // Vr. Comissão/Vr. Repasse: auto-calcula de Prêmio × % até o usuário digitar
+  // manualmente no campo (issue #14)
+  const valorEdited = useRef({ comissao: false, repasse: false });
+  useEffect(() => {
+    const premio = parseFloat(form.premio);
+    if (isNaN(premio)) return;
+    setForm(f => {
+      const next = { ...f };
+      const pc = parseFloat(f.comissao_pct);
+      if (!valorEdited.current.comissao && !isNaN(pc)) next.comissao_valor = (premio * pc / 100).toFixed(2);
+      const pr = parseFloat(f.pct_repasse);
+      if (!valorEdited.current.repasse && !isNaN(pr)) next.valor_repasse = (premio * pr / 100).toFixed(2);
+      return next;
+    });
+  }, [form.premio, form.comissao_pct, form.pct_repasse]);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -544,6 +717,8 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
         premio: form.premio ? parseFloat(form.premio) : null,
         comissao_pct: form.comissao_pct ? parseFloat(form.comissao_pct) : null,
         pct_repasse: form.pct_repasse ? parseFloat(form.pct_repasse) : null,
+        comissao_valor: form.comissao_valor ? parseFloat(form.comissao_valor) : null,
+        valor_repasse: form.valor_repasse ? parseFloat(form.valor_repasse) : null,
         next_action: form.next_action || null,
         next_action_date: form.next_action_date || null,
         campanha: campanhaLabel,
@@ -654,14 +829,22 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
 
           <div>
             <label style={LABEL_S}>Seguradora</label>
-            {lookups?.seguradoras.length ? (
-              <select value={form.seguradora} onChange={field('seguradora')} style={{ ...INPUT_S, cursor: 'pointer' }}>
-                <option value="">— Selecione —</option>
-                {lookups.seguradoras.map(s => <option key={s.codigo} value={s.nome}>{s.nome}</option>)}
-              </select>
-            ) : (
-              <input value={form.seguradora} onChange={field('seguradora')} placeholder="Ex: Porto Seguro, Bradesco..." style={INPUT_S} />
-            )}
+            {/* SEMPRE select (issue #13): antes, falha/demora do /api/corp/lookups
+                degradava silenciosamente para texto livre — foi o que o cliente viu.
+                Agora: carregando → select desabilitado; o endpoint tem cache
+                persistente, então lista vazia é caso extremo. */}
+            <select
+              value={form.seguradora}
+              onChange={field('seguradora')}
+              disabled={lookups === null}
+              style={{ ...INPUT_S, cursor: lookups === null ? 'wait' : 'pointer', opacity: lookups === null ? 0.7 : 1 }}
+            >
+              <option value="">{lookups === null ? 'Carregando seguradoras…' : '— Selecione —'}</option>
+              {(lookups?.seguradoras || []).map(s => <option key={s.codigo} value={s.nome}>{s.nome}</option>)}
+              {form.seguradora && lookups && !lookups.seguradoras.some(s => s.nome === form.seguradora) && (
+                <option value={form.seguradora}>{form.seguradora} (atual)</option>
+              )}
+            </select>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -671,11 +854,21 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
             </div>
             <div>
               <label style={LABEL_S}>Comissão %</label>
-              <input type="number" min="0" max="100" step="0.1" value={form.comissao_pct} onChange={field('comissao_pct')} placeholder="0,0" style={INPUT_S} />
+              <input type="number" min="0" max="100" step="0.1" value={form.comissao_pct} onChange={field('comissao_pct')} onBlur={e => setForm(f => ({ ...f, comissao_pct: clampPct(e.target.value) }))} placeholder="0,0" style={INPUT_S} />
+            </div>
+            {/* Vr. Comissão / Vr. Repasse (issue #14): auto-calculados de Prêmio × %,
+                editáveis para override; sincronizados com o Corp no dual-write */}
+            <div>
+              <label style={LABEL_S}>Vr. Comissão (R$)</label>
+              <input type="number" min="0" step="0.01" value={form.comissao_valor} onChange={e => { valorEdited.current.comissao = true; field('comissao_valor')(e); }} placeholder="auto" style={INPUT_S} />
             </div>
             <div>
               <label style={LABEL_S}>Repasse %</label>
-              <input type="number" min="0" max="100" step="0.1" value={form.pct_repasse} onChange={field('pct_repasse')} placeholder="0,0" style={INPUT_S} />
+              <input type="number" min="0" max="100" step="0.1" value={form.pct_repasse} onChange={field('pct_repasse')} onBlur={e => setForm(f => ({ ...f, pct_repasse: clampPct(e.target.value) }))} placeholder="0,0" style={INPUT_S} />
+            </div>
+            <div>
+              <label style={LABEL_S}>Vr. Repasse (R$)</label>
+              <input type="number" min="0" step="0.01" value={form.valor_repasse} onChange={e => { valorEdited.current.repasse = true; field('valor_repasse')(e); }} placeholder="auto" style={INPUT_S} />
             </div>
             <div>
               <label style={LABEL_S}>Base de Cálc. Repasse</label>
@@ -704,25 +897,17 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
             </div>
             <div>
               <label style={LABEL_S}>Produtor</label>
-              {lookups?.produtores.length ? (
-                <select value={form.produtor} onChange={field('produtor')} style={{ ...INPUT_S, cursor: 'pointer' }}>
-                  <option value="">—</option>
-                  {lookups.produtores.map(p => <option key={p.codigo} value={p.nome}>{p.nome}</option>)}
-                </select>
-              ) : (
-                <input value={form.produtor} onChange={field('produtor')} placeholder="Opcional" style={INPUT_S} />
-              )}
+              <select value={form.produtor} onChange={field('produtor')} disabled={lookups === null} style={{ ...INPUT_S, cursor: lookups === null ? 'wait' : 'pointer', opacity: lookups === null ? 0.7 : 1 }}>
+                <option value="">{lookups === null ? 'Carregando…' : '—'}</option>
+                {(lookups?.produtores || []).map(p => <option key={p.codigo} value={p.nome}>{p.nome}</option>)}
+              </select>
             </div>
             <div>
               <label style={LABEL_S}>Agente</label>
-              {lookups?.agentes.length ? (
-                <select value={form.agente} onChange={field('agente')} style={{ ...INPUT_S, cursor: 'pointer' }}>
-                  <option value="">—</option>
-                  {lookups.agentes.map(a => <option key={a.codigo} value={a.nome}>{a.nome}</option>)}
-                </select>
-              ) : (
-                <input value={form.agente} onChange={field('agente')} placeholder="Opcional" style={INPUT_S} />
-              )}
+              <select value={form.agente} onChange={field('agente')} disabled={lookups === null} style={{ ...INPUT_S, cursor: lookups === null ? 'wait' : 'pointer', opacity: lookups === null ? 0.7 : 1 }}>
+                <option value="">{lookups === null ? 'Carregando…' : '—'}</option>
+                {(lookups?.agentes || []).map(a => <option key={a.codigo} value={a.nome}>{a.nome}</option>)}
+              </select>
             </div>
           </div>
 
@@ -998,18 +1183,37 @@ function FilterBar({
         width={140}
       />
 
-      {/* Próxima Ação date range (select) */}
+      {/* Próxima Ação — presets do Corp (issue #20) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Próxima Ação</span>
-        <select
-          value={filters.dateRange}
-          onChange={e => onChange({ dateRange: e.target.value as FilterState['dateRange'] })}
-          style={filters.dateRange !== 'todos' ? activeFilterStyle : filterInputStyle}
-        >
-          <option value="todos">Todas as datas</option>
-          <option value="hoje">Até hoje</option>
-          <option value="proximos7">Próximos 7 dias</option>
-        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <select
+            value={filters.dateRange}
+            onChange={e => onChange({ dateRange: e.target.value as FilterState['dateRange'] })}
+            style={filters.dateRange !== 'todos' ? activeFilterStyle : filterInputStyle}
+          >
+            <option value="todos">Todas</option>
+            <option value="hoje">Hoje</option>
+            <option value="semana">Esta Semana</option>
+            <option value="mes">Este Mês</option>
+            <option value="proximos">Próximos</option>
+            <option value="atraso">Atraso de</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          {filters.dateRange === 'atraso' && (
+            <>
+              <input type="number" min="1" value={filters.atrasoDias} onChange={e => onChange({ atrasoDias: e.target.value })} style={{ ...filterInputStyle, width: 52 }} />
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>dias+</span>
+            </>
+          )}
+          {filters.dateRange === 'custom' && (
+            <>
+              <input type="date" value={filters.proxFrom} onChange={e => onChange({ proxFrom: e.target.value })} style={{ ...filterInputStyle, width: 118 }} />
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>a</span>
+              <input type="date" value={filters.proxTo} onChange={e => onChange({ proxTo: e.target.value })} style={{ ...filterInputStyle, width: 118 }} />
+            </>
+          )}
+        </div>
       </div>
 
       {/* Prêmio range */}
@@ -1128,9 +1332,9 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
     return true;
   }, [recencyCutoff]);
 
-  // Ordenação do kanban (checkpoint 14/07): vencidas primeiro (asc, padrão
-  // operacional) ou mais recentes primeiro (desc)
-  const [sortRecentFirst, setSortRecentFirst] = useState(false);
+  // Ordenação do kanban: "Mais recentes" é o padrão (issue #10, checkpoint 15/07);
+  // o toggle "Vencidas primeiro" (asc operacional) continua disponível
+  const [sortRecentFirst, setSortRecentFirst] = useState(true);
 
   // ── Drag-and-drop ──────────────────────────────────────────────────────────
   const [draggingDealId, setDraggingDealId] = useState<string | null>(null);
@@ -1300,12 +1504,31 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
       if (filters.tipo.length > 0 && !filters.tipo.includes(d.deal_type || '')) return false;
       if (filters.status.length > 0 && !filters.status.includes(d.status_custom || '')) return false;
 
-      // Date range filter (next_action_date)
+      // Próxima Ação — presets do Corp (issue #20). Comparação por string
+      // yyyy-mm-dd (next_action_date é date puro no banco).
       if (filters.dateRange !== 'todos') {
         if (!d.next_action_date) return false;
-        const dt = new Date(d.next_action_date);
-        if (filters.dateRange === 'hoje' && dt > today) return false;
-        if (filters.dateRange === 'proximos7' && (dt < new Date() || dt > in7)) return false;
+        const nd = d.next_action_date.slice(0, 10);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (filters.dateRange === 'hoje' && nd !== todayStr) return false;
+        if (filters.dateRange === 'semana') {
+          const now = new Date();
+          const dow = (now.getDay() + 6) % 7; // segunda = 0
+          const monday = new Date(now); monday.setDate(now.getDate() - dow);
+          const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+          if (nd < monday.toISOString().slice(0, 10) || nd > sunday.toISOString().slice(0, 10)) return false;
+        }
+        if (filters.dateRange === 'mes' && nd.slice(0, 7) !== todayStr.slice(0, 7)) return false;
+        if (filters.dateRange === 'proximos' && nd <= todayStr) return false;
+        if (filters.dateRange === 'atraso') {
+          const dias = parseInt(filters.atrasoDias) || 1;
+          const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - dias);
+          if (nd > cutoff.toISOString().slice(0, 10)) return false;
+        }
+        if (filters.dateRange === 'custom') {
+          if (filters.proxFrom && nd < filters.proxFrom) return false;
+          if (filters.proxTo && nd > filters.proxTo) return false;
+        }
       }
 
       // Fix 12: Prêmio range
@@ -1557,7 +1780,8 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                 <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
               </svg>
-              {isMobile ? 'Novo' : 'Novo Negócio'}
+              {/* S4.1 (issue #27): no funil Sinistros o botão registra sinistro */}
+              {isMobile ? 'Novo' : activeFunnel?.name === 'Sinistros' ? 'Registrar Sinistro' : 'Novo Negócio'}
             </button>
 
             {!isMobile && <ExportFunnelButton funnelId={activeFunnelId} />}
@@ -1910,7 +2134,14 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
         />
       )}
 
-      {showNewDeal && (
+      {showNewDeal && (activeFunnel?.name === 'Sinistros' ? (
+        <NewSinistroModal
+          funnels={funnels}
+          activeFunnelId={activeFunnelId}
+          onClose={() => setShowNewDeal(false)}
+          onCreated={reloadDeals}
+        />
+      ) : (
         <NewDealModal
           funnels={funnels}
           activeFunnelId={activeFunnelId}
@@ -1918,7 +2149,7 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
           onClose={() => setShowNewDeal(false)}
           onCreated={reloadDeals}
         />
-      )}
+      ))}
 
       {showNewContact && (
         <NewContactModal

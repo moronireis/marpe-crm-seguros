@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
+import { maskPhone, validPhone, validEmail } from '../../lib/masks';
 import { interpolateVariables } from '../../lib/variables';
 
 interface Contact {
@@ -9,6 +10,10 @@ interface Contact {
   last_message?: string | null;
   last_message_direction?: 'inbound' | 'outbound';
   last_message_at?: string;
+  // Sprint S3 (migração 20260717)
+  inbox_read_at?: string | null;
+  pinned?: boolean;
+  conv_status?: string;
 }
 
 interface Message {
@@ -21,9 +26,11 @@ interface Message {
 }
 
 // Resolve the best available URL for a media message.
-// Priority: stored media_url → proxy via wa_message_id → null
+// Priority: stored media_url (Storage) → proxy via wa_message_id → null
+// URLs do CDN do WhatsApp (mmg.whatsapp.net) NÃO servem: expiram e o conteúdo é
+// criptografado — nesses casos o proxy self-healing recupera via UazapiGO (fix #21).
 function resolveMediaUrl(m: Message): string | null {
-  if (m.media_url) return m.media_url;
+  if (m.media_url && !m.media_url.includes('whatsapp.net')) return m.media_url;
   if (m.wa_message_id) return `/api/media/download?msgid=${encodeURIComponent(m.wa_message_id)}`;
   return null;
 }
@@ -158,11 +165,12 @@ function AudioPlayer({ src, mime, avatarUrl }: { src: string | null; mime: strin
   }
 
   if (loadError) {
+    // Proxy 410 (expirada na UazapiGO) ou rede — estado terminal, sem link morto (fix #21)
     return (
-      <a href={src} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent)', fontSize: 12, textDecoration: 'none' }}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Abrir áudio
-      </a>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+        Áudio expirado — peça para reenviar
+      </div>
     );
   }
 
@@ -260,23 +268,28 @@ function MessageContent({ m }: { m: Message }) {
     return (
       <div>
         {src ? (
-          <a href={src} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
-            <img
-              src={src}
-              alt={body || 'Imagem'}
-              style={{ maxWidth: 260, width: '100%', borderRadius: 10, display: 'block', cursor: 'pointer', objectFit: 'cover' }}
-              onError={e => {
-                const img = e.target as HTMLImageElement;
-                img.style.display = 'none';
-                const fallback = img.nextElementSibling as HTMLElement | null;
-                if (fallback) fallback.style.display = 'flex';
-              }}
-            />
-            <div style={{ display: 'none', alignItems: 'center', gap: 6, padding: '6px 0' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-              <span style={{ fontSize: 11, color: 'var(--accent)' }}>Ver imagem</span>
+          <div>
+            <a href={src} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
+              <img
+                src={src}
+                alt={body || 'Imagem'}
+                style={{ maxWidth: 260, width: '100%', borderRadius: 10, display: 'block', cursor: 'pointer', objectFit: 'cover' }}
+                onError={e => {
+                  // Proxy respondeu 410 (mídia expirada na UazapiGO) ou rede falhou —
+                  // mostra estado terminal claro em vez de link morto (fix #21)
+                  const img = e.target as HTMLImageElement;
+                  const anchor = img.parentElement as HTMLElement | null;
+                  if (anchor) anchor.style.display = 'none';
+                  const fallback = anchor?.nextElementSibling as HTMLElement | null;
+                  if (fallback) fallback.style.display = 'flex';
+                }}
+              />
+            </a>
+            <div style={{ display: 'none', alignItems: 'center', gap: 6, padding: '6px 0', color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              Imagem expirada — peça para reenviar
             </div>
-          </a>
+          </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -315,9 +328,9 @@ function MessageContent({ m }: { m: Message }) {
             >
               <source src={src} type={media_mime || 'video/mp4'} />
             </video>
-            <div style={{ display: 'none', padding: '10px 12px', alignItems: 'center', gap: 6 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              <a href={src} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontSize: 12 }}>Abrir vídeo</a>
+            <div style={{ display: 'none', padding: '10px 12px', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              Vídeo expirado — peça para reenviar
             </div>
           </div>
         ) : (
@@ -386,8 +399,28 @@ function MessageContent({ m }: { m: Message }) {
     );
   }
 
-  // Default: plain text
-  return <>{body}</>;
+  // Default: texto com a formatação do WhatsApp (S3.9, issue #8)
+  return <>{formatWaText(body || '')}</>;
+}
+
+// Renderiza a formatação leve do WhatsApp: *negrito*, _itálico_, ~tachado~ e
+// ```mono``` (S3.9, issue #8 — antes os marcadores apareciam crus no chat).
+function formatWaText(text: string): React.ReactNode {
+  if (!text || !/[*_~`]/.test(text)) return text;
+  const parts: React.ReactNode[] = [];
+  const re = /\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~|```([\s\S]+?)```/g;
+  let last = 0;
+  let mIdx = 0;
+  for (let match = re.exec(text); match; match = re.exec(text)) {
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    if (match[1] !== undefined) parts.push(<strong key={mIdx++}>{match[1]}</strong>);
+    else if (match[2] !== undefined) parts.push(<em key={mIdx++}>{match[2]}</em>);
+    else if (match[3] !== undefined) parts.push(<s key={mIdx++}>{match[3]}</s>);
+    else if (match[4] !== undefined) parts.push(<code key={mIdx++} style={{ fontSize: '0.92em', background: 'var(--field-bg)', padding: '1px 5px', borderRadius: 5 }}>{match[4]}</code>);
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 // Short label for media messages in the contact list preview
@@ -488,6 +521,155 @@ export default function InboxView() {
   // Contato aberto via deep-link (?contact=) que pode não estar na 1ª página da
   // lista (limit 50) — mantido à parte para sobreviver ao polling da lista
   const [pinnedContact, setPinnedContact] = useState<Contact | null>(null);
+
+  // ── Sprint S3 (checkpoint 15/07) ──────────────────────────────────────────
+  // S3.4 (issue #2): painel Dados do Contato oculto por padrão, preferência local
+  const [showContactPanel, setShowContactPanel] = useState(false);
+  useEffect(() => { setShowContactPanel(localStorage.getItem('inbox_contact_panel') === '1'); }, []);
+  function toggleContactPanel() {
+    setShowContactPanel(v => { localStorage.setItem('inbox_contact_panel', v ? '0' : '1'); return !v; });
+  }
+  // S3.5 (issue #3): filtro Não lidas + S3.8 (issue #4): filtro por etiqueta
+  const [onlyUnread, setOnlyUnread] = useState(false);
+  const [tagFilter, setTagFilter] = useState('');
+  // S3.1-S3.3 (issues #1 #5 #7): anexos, gravação de áudio e colar imagem
+  const [attachPreview, setAttachPreview] = useState<{ kind: 'image' | 'video' | 'document' | 'audio'; dataURI: string; mime: string; filename: string; caption: string } | null>(null);
+  const [sendingMedia, setSendingMedia] = useState(false);
+  const [mediaError, setMediaError] = useState('');
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordSecs, setRecordSecs] = useState(0);
+  const mediaRecRef = useRef<MediaRecorder | null>(null);
+  const recChunksRef = useRef<Blob[]>([]);
+  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recDiscardRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputKind = useRef<'document' | 'media'>('media');
+
+  // Não lida = última msg é inbound E mais recente que a marca de leitura persistida
+  // (inbox_read_at — migração 20260717); o Set da sessão dá resposta otimista.
+  const isUnread = useCallback((c: any) =>
+    c.last_message_direction === 'inbound'
+    && (!c.inbox_read_at || (c.last_message_at && c.last_message_at > c.inbox_read_at))
+    && !readContactIds.has(c.id), [readContactIds]);
+
+  function markRead(contactId: string) {
+    setReadContactIds(prev => { const s = new Set(prev); s.add(contactId); return s; });
+    fetch(`/api/contacts/${contactId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inbox_read_at: new Date().toISOString() }),
+    }).catch(() => {});
+  }
+
+  function patchContactLocal(contactId: string, patch: Record<string, any>) {
+    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, ...patch } : c));
+    setPinnedContact(prev => prev && prev.id === contactId ? { ...prev, ...patch } as Contact : prev);
+  }
+
+  // S3.8: favoritar e finalizar conversa
+  async function togglePinContact(c: any) {
+    const v = !c.pinned;
+    patchContactLocal(c.id, { pinned: v });
+    await fetch(`/api/contacts/${c.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned: v }),
+    }).catch(() => patchContactLocal(c.id, { pinned: !v }));
+  }
+  async function toggleConvStatus(c: any) {
+    const v = c.conv_status === 'closed' ? 'open' : 'closed';
+    patchContactLocal(c.id, { conv_status: v });
+    await fetch(`/api/contacts/${c.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conv_status: v }),
+    }).catch(() => patchContactLocal(c.id, { conv_status: c.conv_status }));
+  }
+
+  // S3.1: arquivo escolhido/colado → preview com legenda antes do envio
+  function fileToPreview(f: File, forceKind?: 'document') {
+    if (f.size > 45 * 1024 * 1024) { setMediaError('Arquivo acima de 45 MB.'); return; }
+    const kind = forceKind ? 'document'
+      : f.type.startsWith('image/') ? 'image'
+      : f.type.startsWith('video/') ? 'video'
+      : 'document';
+    const reader = new FileReader();
+    reader.onload = () => {
+      setMediaError('');
+      setAttachPreview({ kind, dataURI: String(reader.result), mime: f.type || 'application/octet-stream', filename: f.name, caption: '' });
+    };
+    reader.readAsDataURL(f);
+  }
+
+  function onFilesPicked(files: FileList | null) {
+    const f = files?.[0];
+    if (!f) return;
+    fileToPreview(f, fileInputKind.current === 'document' ? 'document' : undefined);
+  }
+
+  // S3.2: gravação de áudio (MediaRecorder → UazapiGO transcodifica p/ voz)
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      recChunksRef.current = [];
+      recDiscardRef.current = false;
+      mr.ondataavailable = e => { if (e.data.size > 0) recChunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (recDiscardRef.current) return;
+        const blob = new Blob(recChunksRef.current, { type: mr.mimeType || 'audio/webm' });
+        const reader = new FileReader();
+        reader.onload = () => setAttachPreview({ kind: 'audio', dataURI: String(reader.result), mime: blob.type, filename: 'audio.webm', caption: '' });
+        reader.readAsDataURL(blob);
+      };
+      mr.start();
+      mediaRecRef.current = mr;
+      setRecording(true);
+      setRecordSecs(0);
+      recTimerRef.current = setInterval(() => setRecordSecs(s => s + 1), 1000);
+    } catch {
+      setMediaError('Microfone indisponível — verifique a permissão do navegador.');
+    }
+  }
+  function stopRecording(discard: boolean) {
+    recDiscardRef.current = discard;
+    if (recTimerRef.current) clearInterval(recTimerRef.current);
+    setRecording(false);
+    mediaRecRef.current?.stop();
+    mediaRecRef.current = null;
+  }
+
+  async function sendMedia() {
+    if (!attachPreview || !activeContact || sendingMedia) return;
+    setSendingMedia(true);
+    setMediaError('');
+    try {
+      const res = await fetch('/api/messages/media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_id: activeContact.id,
+          phone: activeContact.phone,
+          kind: attachPreview.kind,
+          data: attachPreview.dataURI,
+          filename: attachPreview.filename,
+          caption: attachPreview.caption || undefined,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMediaError(d.error || 'Falha no envio da mídia.');
+      } else {
+        setAttachPreview(null);
+        const r = await fetch(`/api/messages?contact_id=${activeContact.id}`);
+        const md = await r.json();
+        setMessages(md.messages || []);
+      }
+    } catch {
+      setMediaError('Erro de rede ao enviar a mídia.');
+    }
+    setSendingMedia(false);
+  }
 
   // Check WhatsApp connection status
   useEffect(() => {
@@ -590,6 +772,28 @@ export default function InboxView() {
     (pinnedContact && pinnedContact.id === activeContactId ? pinnedContact : undefined);
   const isGroupContact = (activeContact as any)?.source === 'whatsapp_group';
 
+  // S3.9 (issue #8): "@556299999999" → "@Nome" quando o número bate com um contato
+  // carregado (compara pelos últimos 8 dígitos — cobre variações de 9º dígito/DDI)
+  const resolveMentions = useCallback((text: string) => {
+    if (!text.includes('@')) return text;
+    return text.replace(/@(\d{10,15})/g, (full, num: string) => {
+      const tail = num.slice(-8);
+      const match = contacts.find(ct => (ct.phone || '').replace(/\D/g, '').endsWith(tail));
+      return match ? `@${match.name}` : full;
+    });
+  }, [contacts]);
+
+  // S3.5/S3.8: lista com filtros (Não lidas, etiqueta) e favoritas no topo
+  const unreadCount = useMemo(() => contacts.reduce((n, c) => n + (isUnread(c) ? 1 : 0), 0), [contacts, isUnread]);
+  const allTags = useMemo(() =>
+    [...new Set(contacts.flatMap(c => c.tags || []))].sort(), [contacts]);
+  const listContacts = useMemo(() => {
+    let list = contacts;
+    if (onlyUnread) list = list.filter(isUnread);
+    if (tagFilter) list = list.filter(c => (c.tags || []).includes(tagFilter));
+    return [...list].sort((a, b) => ((b as any).pinned ? 1 : 0) - ((a as any).pinned ? 1 : 0));
+  }, [contacts, onlyUnread, tagFilter, isUnread]);
+
   // Populate editable fields when active contact changes
   // (activeContact?.id no deps: cobre o caso do contato pinado chegar depois via fetch)
   useEffect(() => {
@@ -661,6 +865,7 @@ export default function InboxView() {
 
   async function saveContact() {
     if (!activeContactId) return;
+    if (!validPhone(editPhone) || !validEmail(editEmail)) return; // borda vermelha já indica o campo
     setSavingContact(true);
     setSaveSuccess(false);
     try {
@@ -766,6 +971,21 @@ export default function InboxView() {
               {tab === 'conversas' ? 'Conversas' : 'Grupos'}
             </button>
           ))}
+          {/* S3.5 (issue #3): filtro Não lidas */}
+          <button onClick={() => setOnlyUnread(v => !v)}
+            style={{
+              flex: 1, padding: '10px 0', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              borderBottom: `2px solid ${onlyUnread ? 'var(--accent)' : 'transparent'}`,
+              color: onlyUnread ? 'var(--accent-light)' : 'var(--text-muted)',
+              transition: 'color 0.18s, border-color 0.18s', letterSpacing: '0.03em',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            }}>
+            Não lidas
+            {unreadCount > 0 && (
+              <span style={{ fontSize: 9.5, fontWeight: 700, background: 'var(--accent)', color: '#fff', borderRadius: 999, padding: '1px 6px', lineHeight: 1.5 }}>{unreadCount}</span>
+            )}
+          </button>
         </div>
 
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--hairline)' }}>
@@ -775,6 +995,14 @@ export default function InboxView() {
             onFocus={e => { e.target.style.borderColor = 'var(--accent)'; e.target.style.boxShadow = '0 0 0 3px var(--accent-dim)'; }}
             onBlur={e => { e.target.style.borderColor = 'var(--hairline)'; e.target.style.boxShadow = 'none'; }}
           />
+          {/* S3.8: filtro por etiqueta */}
+          {allTags.length > 0 && (
+            <select value={tagFilter} onChange={e => setTagFilter(e.target.value)}
+              style={{ width: '100%', marginTop: 6, padding: '6px 12px', background: 'var(--field-bg)', border: `1px solid ${tagFilter ? 'rgba(59,130,246,0.5)' : 'var(--hairline)'}`, borderRadius: 999, color: tagFilter ? 'var(--accent-light)' : 'var(--text-muted)', fontSize: 11.5, outline: 'none', fontFamily: 'inherit', cursor: 'pointer', boxSizing: 'border-box' }}>
+              <option value="">Todas as etiquetas</option>
+              {allTags.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px' }}>
           {loadingContacts ? (
@@ -789,19 +1017,19 @@ export default function InboxView() {
                 </div>
               ))}
             </div>
-          ) : contacts.length === 0 ? (
+          ) : listContacts.length === 0 ? (
             <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
-              {activeTab === 'grupos' ? 'Nenhum grupo encontrado' : 'Nenhum contato encontrado'}
+              {onlyUnread ? 'Nenhuma conversa não lida' : activeTab === 'grupos' ? 'Nenhum grupo encontrado' : 'Nenhum contato encontrado'}
             </div>
-          ) : contacts.map(c => {
+          ) : listContacts.map(c => {
             const isGroup = (c as any).source === 'whatsapp_group';
             const preview = c.last_message || '';
             const mediaLabel = mediaPreviewLabel((c as any).last_content_type || '');
             return (
             <div key={c.id} onClick={() => {
               setActiveContactId(c.id);
-              // Fix 6: mark as read when opened
-              setReadContactIds(prev => { const s = new Set(prev); s.add(c.id); return s; });
+              // S3.5: marca leitura persistida (inbox_read_at) + sessão
+              markRead(c.id);
             }}
               style={{ display: 'flex', gap: 12, padding: '10px 10px', cursor: 'pointer',
                 borderRadius: 12, marginBottom: 2,
@@ -820,9 +1048,13 @@ export default function InboxView() {
                     : (isGroup ? 'G' : getInitials(c.name))
                   }
                 </div>
-                {/* Fix 6: Unread dot — shown when last message is inbound and contact hasn't been opened this session */}
-                {c.last_message_direction === 'inbound' && activeContactId !== c.id && !readContactIds.has(c.id) && (
+                {/* S3.5: bolinha de não lida — modelo persistido (inbox_read_at) */}
+                {isUnread(c) && activeContactId !== c.id && (
                   <div style={{ position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--bg-primary)', boxShadow: '0 0 8px var(--accent-glow)', boxSizing: 'content-box' }} />
+                )}
+                {/* S3.8: favorita */}
+                {(c as any).pinned && (
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="var(--accent)" stroke="none" style={{ position: 'absolute', bottom: -2, right: -2 }}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                 )}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -868,12 +1100,37 @@ export default function InboxView() {
                 : (isGroupContact ? 'G' : getInitials(activeContact.name))
               }
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>{activeContact.name}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeContact.name}</span>
+                {(activeContact as any).conv_status === 'closed' && (
+                  <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--green)', background: 'var(--green-dim)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 999, padding: '2px 8px', flexShrink: 0 }}>Finalizada</span>
+                )}
+              </div>
               <div style={{ fontSize: 11, color: isGroupContact ? '#22d3ee' : 'var(--text-muted)' }}>
                 {isGroupContact ? 'Grupo WhatsApp' : (activeContact.phone || '')}
               </div>
             </div>
+            {/* S3.8 (issue #4): favoritar + finalizar · S3.4 (issue #2): mostrar dados */}
+            {!isGroupContact && (
+              <button onClick={() => togglePinContact(activeContact)} title={(activeContact as any).pinned ? 'Desafixar conversa' : 'Favoritar conversa'}
+                style={{ width: 32, height: 32, borderRadius: 9, border: '1px solid var(--hairline)', background: (activeContact as any).pinned ? 'var(--accent-dim)' : 'var(--field-bg)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s var(--ease-out)' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill={(activeContact as any).pinned ? 'var(--accent)' : 'none'} stroke={(activeContact as any).pinned ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.8" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              </button>
+            )}
+            {!isGroupContact && (
+              <button onClick={() => toggleConvStatus(activeContact)} title={(activeContact as any).conv_status === 'closed' ? 'Reabrir conversa' : 'Finalizar conversa'}
+                style={{ width: 32, height: 32, borderRadius: 9, border: '1px solid var(--hairline)', background: (activeContact as any).conv_status === 'closed' ? 'var(--green-dim)' : 'var(--field-bg)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s var(--ease-out)' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={(activeContact as any).conv_status === 'closed' ? 'var(--green)' : 'var(--text-muted)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </button>
+            )}
+            {!isMobile && (
+              <button onClick={toggleContactPanel} title={showContactPanel ? 'Ocultar dados do contato' : 'Ver dados do contato'}
+                style={{ height: 32, padding: '0 12px', borderRadius: 9, border: `1px solid ${showContactPanel ? 'rgba(59,130,246,0.4)' : 'var(--hairline)'}`, background: showContactPanel ? 'var(--accent-dim)' : 'var(--field-bg)', color: showContactPanel ? 'var(--accent-light)' : 'var(--text-secondary)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, fontFamily: 'inherit', transition: 'all 0.18s var(--ease-out)' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                Dados
+              </button>
+            )}
           </div>
 
           <div className="glass-panel anim" style={{ ['--i' as any]: 2, flex: 1, borderRadius: 'var(--radius-lg)', overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -893,16 +1150,20 @@ export default function InboxView() {
               const isAuto = m.is_from_automation;
               const isMediaBubble = m.content_type !== 'text';
 
-              // For group messages: parse sender prefix from body OR read from metadata
+              // For group messages: parse sender prefix from body OR read from metadata.
+              // S3.6 (issue #6): o parse vale para TODOS os tipos — em mídia, o prefixo
+              // "[Remetente]" vazava como legenda visível sob a imagem.
               const metaSender = m.metadata?.sender_name || null;
               const metaPhoto  = m.metadata?.sender_photo || null;
-              const { sender: bodySender, text: cleanedText } = isGroupContact && m.content_type === 'text'
+              const { sender: bodySender, text: cleanedText } = isGroupContact && m.body
                 ? parseGroupBody(m.body)
                 : { sender: null, text: m.body };
               const groupSender = metaSender || bodySender;
 
-              const displayMsg: Message = (groupSender !== null || (isGroupContact && cleanedText !== m.body))
-                ? { ...m, body: cleanedText }
+              // S3.9 (issue #8): resolve menções @<número> para o nome do contato
+              const resolvedBody = cleanedText ? resolveMentions(cleanedText) : cleanedText;
+              const displayMsg: Message = (groupSender !== null || resolvedBody !== m.body)
+                ? { ...m, body: resolvedBody }
                 : m;
 
               // Avatar for group inbound messages
@@ -979,15 +1240,114 @@ export default function InboxView() {
                   {interpolateVariables(newMsg, { contact: activeContact })}
                 </div>
               )}
+              {/* S3.1 (issues #1 #5): preview do anexo antes do envio */}
+              {attachPreview && (
+                <div className="glass-modal fade-in" style={{ position: 'absolute', bottom: 'calc(100% + 10px)', left: 16, right: 16, zIndex: 70, borderRadius: 14, padding: 12 }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    {attachPreview.kind === 'image' && <img src={attachPreview.dataURI} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />}
+                    {attachPreview.kind === 'video' && <video src={attachPreview.dataURI} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 10, flexShrink: 0 }} />}
+                    {attachPreview.kind === 'audio' && (
+                      <div style={{ width: 64, height: 64, borderRadius: 10, background: 'var(--accent-dim)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, flexShrink: 0 }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.8" strokeLinecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+                        <audio src={attachPreview.dataURI} controls style={{ display: 'none' }} />
+                      </div>
+                    )}
+                    {attachPreview.kind === 'document' && (
+                      <div style={{ width: 64, height: 64, borderRadius: 10, background: 'var(--field-bg)', border: '1px solid var(--hairline)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {attachPreview.kind === 'audio' ? 'Mensagem de voz' : attachPreview.filename}
+                      </div>
+                      {attachPreview.kind !== 'audio' && (
+                        <input value={attachPreview.caption} onChange={e => setAttachPreview(p => p ? { ...p, caption: e.target.value } : p)}
+                          placeholder="Legenda (opcional)..."
+                          style={{ width: '100%', marginTop: 6, padding: '6px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                      )}
+                      {mediaError && <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{mediaError}</div>}
+                    </div>
+                    <button onClick={() => { setAttachPreview(null); setMediaError(''); }} disabled={sendingMedia}
+                      style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
+                      Cancelar
+                    </button>
+                    <button onClick={sendMedia} disabled={sendingMedia}
+                      style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, opacity: sendingMedia ? 0.6 : 1 }}>
+                      {sendingMedia ? 'Enviando…' : 'Enviar'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* S3.1: menu do clipe */}
+              {attachMenuOpen && (
+                <div className="glass-modal fade-in" style={{ position: 'absolute', bottom: 'calc(100% + 10px)', left: 16, zIndex: 70, borderRadius: 14, padding: '6px 0', minWidth: 190 }}>
+                  {([
+                    ['document', 'Documento', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6'],
+                    ['media', 'Fotos e vídeos', 'M3 3h18v18H3z M8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M21 15l-5-5L5 21'],
+                  ] as const).map(([kind, label, path]) => (
+                    <div key={kind}
+                      onClick={() => { fileInputKind.current = kind; setAttachMenuOpen(false); fileInputRef.current?.click(); }}
+                      style={{ padding: '9px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, transition: 'background 0.15s var(--ease-out)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={path}/></svg>
+                      {label}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input ref={fileInputRef} type="file" style={{ display: 'none' }}
+                accept={undefined}
+                onChange={e => { onFilesPicked(e.target.files); e.target.value = ''; }} />
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                {/* S3.1: clipe de anexo */}
+                <button onClick={() => setAttachMenuOpen(v => !v)} disabled={sending || recording} title="Anexar"
+                  style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: attachMenuOpen ? 'var(--accent-dim)' : 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s var(--ease-out)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                </button>
+                {recording ? (
+                  /* S3.2 (issue #1): gravação em andamento */
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                    <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1.1s infinite' }} />
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                      Gravando… {Math.floor(recordSecs / 60)}:{String(recordSecs % 60).padStart(2, '0')}
+                    </span>
+                    <div style={{ flex: 1 }} />
+                    <button onClick={() => stopRecording(true)} title="Descartar"
+                      style={{ padding: '6px 12px', borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      Descartar
+                    </button>
+                    <button onClick={() => stopRecording(false)} title="Parar e revisar"
+                      style={{ padding: '6px 14px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                      Parar
+                    </button>
+                  </div>
+                ) : (
                 <textarea ref={inputRef} rows={1} value={newMsg} onChange={e => handleMsgChange(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === 'Escape') { setShowTemplates(false); return; }
                     if (e.key === 'Enter' && !e.shiftKey && !showTemplates) { e.preventDefault(); sendMessage(); }
                   }}
+                  onPaste={e => {
+                    // S3.3 (issue #7): colar imagem/arquivo da área de transferência
+                    const item = Array.from(e.clipboardData.items).find(i => i.kind === 'file');
+                    if (item) {
+                      const f = item.getAsFile();
+                      if (f) { e.preventDefault(); fileToPreview(f); }
+                    }
+                  }}
                   placeholder="Digite / para templates ou mensagem..." disabled={sending}
                   style={{ flex: 1, padding: '8px 0', background: 'transparent', border: 'none', borderRadius: 0, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxShadow: 'none', resize: 'none', maxHeight: 132, lineHeight: 1.5 }}
                 />
+                )}
+                {/* S3.2: microfone */}
+                {!recording && !newMsg.trim() && (
+                  <button onClick={startRecording} disabled={sending} title="Gravar áudio"
+                    style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s var(--ease-out)' }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                  </button>
+                )}
                 <button onClick={sendMessage} disabled={sending || !newMsg.trim() || showTemplates}
                   style={{ width: 38, height: 38, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: (sending || !newMsg.trim() || showTemplates) ? 0.45 : 1, transition: 'opacity 0.18s var(--ease-out), box-shadow 0.2s var(--ease-out), transform 0.22s var(--ease-spring)', boxShadow: (!sending && newMsg.trim()) ? '0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)' : 'inset 0 1px 0 rgba(255,255,255,0.2)' }}
                   onMouseEnter={e => { if (newMsg.trim()) e.currentTarget.style.transform = 'scale(1.08)'; }}
@@ -1007,18 +1367,18 @@ export default function InboxView() {
         </div>
       ) : null}
 
-      {/* CRM Side Panel — hidden on mobile */}
-      {activeContact && !isMobile && (
+      {/* CRM Side Panel — oculto por padrão (S3.4, issue #2), abre pelo botão "Dados" */}
+      {activeContact && !isMobile && showContactPanel && (
         <div className="glass-panel anim" style={{ ['--i' as any]: 2, width: 300, borderRadius: 'var(--radius-lg)', flexShrink: 0, overflowY: 'auto', padding: '14px 18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Dados do Contato</div>
             <a href={`/contato/${activeContact.id}`} style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'none' }}>Ver perfil</a>
           </div>
 
-          {/* Editable fields */}
+          {/* Editable fields — telefone com máscara e e-mail validado (issue #12) */}
           {([
             ['Nome', editName, setEditName, 'text'],
-            ['Telefone', editPhone, setEditPhone, 'tel'],
+            ['Telefone', editPhone, (v: string) => setEditPhone(maskPhone(v)), 'tel'],
             ['E-mail', editEmail, setEditEmail, 'email'],
             ['Cidade', editCity, setEditCity, 'text'],
           ] as [string, string, (v: string) => void, string][]).map(([label, value, setter, type]) => (
@@ -1029,10 +1389,44 @@ export default function InboxView() {
                 onChange={e => setter(e.target.value)}
                 type={type}
                 placeholder={`${label}...`}
-                style={{ width: '100%', padding: '7px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                style={{
+                  width: '100%', padding: '7px 10px', background: 'var(--field-bg)',
+                  border: `1px solid ${(label === 'Telefone' && !validPhone(value)) || (label === 'E-mail' && !validEmail(value)) ? 'rgba(239,68,68,0.55)' : 'var(--hairline)'}`,
+                  borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+                }}
               />
             </div>
           ))}
+
+          {/* S3.8 (issue #4): etiquetas da conversa */}
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 4 }}>Etiquetas</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 5 }}>
+              {(activeContact.tags || []).map(t => (
+                <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 600, background: 'var(--accent-dim)', color: 'var(--accent-light)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 999, padding: '2px 8px' }}>
+                  {t}
+                  <svg onClick={() => {
+                    const tags = (activeContact.tags || []).filter(x => x !== t);
+                    patchContactLocal(activeContact.id, { tags });
+                    fetch(`/api/contacts/${activeContact.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags }) }).catch(() => {});
+                  }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" style={{ cursor: 'pointer', opacity: 0.7 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </span>
+              ))}
+            </div>
+            <input
+              placeholder="Nova etiqueta + Enter..."
+              onKeyDown={e => {
+                if (e.key !== 'Enter') return;
+                const v = (e.target as HTMLInputElement).value.trim().toLowerCase();
+                if (!v) return;
+                const tags = [...new Set([...(activeContact.tags || []), v])];
+                patchContactLocal(activeContact.id, { tags });
+                fetch(`/api/contacts/${activeContact.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags }) }).catch(() => {});
+                (e.target as HTMLInputElement).value = '';
+              }}
+              style={{ width: '100%', padding: '6px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 11.5, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
+            />
+          </div>
 
           <div style={{ marginBottom: 10 }}>
             <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 3 }}>Observacoes</label>

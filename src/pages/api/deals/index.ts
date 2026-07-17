@@ -62,7 +62,9 @@ export const POST: APIRoute = async ({ locals, request }) => {
   // Dual-write no Corp — atrás da flag corp_write_negocio ({ enabled: true } liga).
   // Payload obrigatório resolvido em 2026-07-09 via doc oficial (ver createNegocio).
   let corpDealId: string | null = null;
-  if (contact?.corp_id) {
+  // skip_corp: sinistros manuais (S4.1) não criam NEGÓCIO no Corp — não há rota
+  // de escrita de sinistro confirmada na CorpAPI
+  if (contact?.corp_id && !body.skip_corp) {
     const { data: flag } = await sb
       .from('marpe_settings')
       .select('value')
@@ -80,6 +82,9 @@ export const POST: APIRoute = async ({ locals, request }) => {
           val_premio: body.premio ? Number(body.premio) : 0,
           per_c: body.comissao_pct ? Number(body.comissao_pct) : 0,
           per_r: body.pct_repasse ? Number(body.pct_repasse) : 0,
+          // Vr. Comissão / Vr. Repasse (issue #14) — round-trip com o Corp
+          ...(body.comissao_valor ? { val_c: Number(body.comissao_valor) } : {}),
+          ...(body.valor_repasse ? { val_r: Number(body.valor_repasse) } : {}),
           produto_ja_possui: body.ja_possui_produto ? 'T' : 'F',
           ...(body.base_calculo_repasse ? { campo_base_r: Number(body.base_calculo_repasse) } : {}),
           // Campanha só existe como código na CorpAPI (nome não é exposto) —
@@ -108,6 +113,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       apolice: body.apolice || null,
       premio: body.premio || null,
       comissao_pct: body.comissao_pct || null,
+      comissao_valor: body.comissao_valor || null,
       produtor: body.produtor || null,
       vigencia_inicio: body.vigencia_inicio || null,
       vigencia_fim: body.vigencia_fim || null,
@@ -129,6 +135,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
       placa: body.placa || null,
       next_action: body.next_action || null,
       next_action_date: body.next_action_date || null,
+      ...(body.detalhes_corp ? { detalhes_corp: body.detalhes_corp } : {}),
     })
     .select('*, marpe_contacts(id, name, phone), marpe_funnel_stages(id, name, color)')
     .single();

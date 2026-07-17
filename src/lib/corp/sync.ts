@@ -1,5 +1,5 @@
 import { createServerClient } from '../supabase-server';
-import { listClientes, getCliente, listDocumentos, listNegociosAndamento, getNegocio, listRamos, listProdutores } from './client';
+import { listClientes, getCliente, listDocumentos, listNegociosAndamento, getNegocio, listRamos, listProdutores, listSinistros } from './client';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CorpNegocio, CorpNegocioDetail } from './types';
 
@@ -280,6 +280,42 @@ export async function deleteCorpDeletedDeal(
   return error ? error.message : null;
 }
 
+// Cria um contato no CRM a partir do cliente do Corp (fluxo do issue #15: cliente
+// criado no Corp no mesmo dia do negócio). Retorna o id do contato ou null.
+// Se outro processo criou o contato em paralelo, recupera pelo corp_id.
+async function createContactFromCorp(sb: SupabaseClient, codcli: number): Promise<string | null> {
+  let detail: Awaited<ReturnType<typeof getCliente>>;
+  try {
+    detail = await getCliente(codcli);
+  } catch {
+    return null;
+  }
+  if (!detail?.nome) return null;
+
+  const { data: inserted, error } = await sb.from('marpe_contacts').insert({
+    name: detail.nome,
+    cpf_cnpj: detail.cpf_cnpj || null,
+    email: detail.email || null,
+    phone: detail.telefone || null,
+    city: detail.cidade || null,
+    state: detail.estado || 'RS',
+    birth_date: parseCorpDate(detail.datanas),
+    profession: detail.profissao || null,
+    marital_status: detail.estado_civil || null,
+    corp_id: String(codcli),
+    source: 'corp_sync',
+    address: detail.enderecos?.[0] ? `${detail.enderecos[0].logradouro}, ${detail.enderecos[0].numero}` : null,
+  }).select('id').maybeSingle();
+
+  if (inserted?.id) return inserted.id;
+  if (error) {
+    const { data: existing } = await sb.from('marpe_contacts')
+      .select('id').eq('corp_id', String(codcli)).maybeSingle();
+    return existing?.id || null;
+  }
+  return null;
+}
+
 // Trilhos de segurança da reconciliação: nunca deletar em massa por falha de lista.
 // A proteção REAL contra deleção em massa é a confirmação individual via GET /negocio
 // + o cap de exclusões; o teto de candidatos é só sanidade contra lista ensandecida.
@@ -470,7 +506,17 @@ export async function syncNegocios(opts?: {
 
   for (const neg of allNegocios) {
     const corpNegId = `neg_${neg.codfil}_${neg.codigo}`;
-    const contactId = contactMap.get(String(neg.codcli));
+    let contactId = contactMap.get(String(neg.codcli));
+    if (!contactId) {
+      // Cliente criado no Corp no MESMO DIA (issue #15): o contato só entraria no
+      // cron noturno de clientes e o negócio ficava pulado até lá. Cria o contato
+      // inline a partir do detalhe do Corp e segue com o deal normalmente.
+      const created = await createContactFromCorp(sb, neg.codcli);
+      if (created) {
+        contactMap.set(String(neg.codcli), created);
+        contactId = created;
+      }
+    }
     if (!contactId) { result.skipped++; continue; }
 
     const detail = detailMap.get(neg.codigo);
@@ -511,6 +557,89 @@ export async function syncNegocios(opts?: {
       listComplete: allNegocios.length >= total,
       dryRun: opts?.reconcileDryRun,
     });
+  }
+
+  return result;
+}
+
+// ── Sinistros (S4.1, issue #27) ───────────────────────────────────────────────
+// GET /sinistros não traz codcli — o vínculo com o contato é via nosnum (apólice),
+// que já existe no CRM como deal doc_{codfil}_{nosnum}. A etapa do funil Sinistros
+// segue a situação do Corp (sinistro é Corp-owned: mover card manualmente será
+// sobrescrito no próximo sync).
+export async function syncSinistros(): Promise<SyncResult> {
+  const sb = createServerClient();
+  const result: SyncResult = { type: 'sinistros', created: 0, updated: 0, skipped: 0, errors: [] };
+
+  const { data: funil } = await sb.from('marpe_funnels').select('id').eq('name', 'Sinistros').maybeSingle();
+  if (!funil?.id) { result.errors.push('Funil Sinistros não encontrado'); return result; }
+  const { data: stages } = await sb.from('marpe_funnel_stages')
+    .select('id, name, sort_order, is_terminal').eq('funnel_id', funil.id).order('sort_order');
+  if (!stages?.length) { result.errors.push('Funil Sinistros sem etapas'); return result; }
+
+  const stageFor = (situacao: string | null, encerrado: boolean): string => {
+    const s = (situacao || '').toLowerCase();
+    const find = (re: RegExp) => stages.find(st => re.test(st.name.toLowerCase()))?.id;
+    if (encerrado) return find(/conclu|encerr/) || stages[stages.length - 1].id;
+    if (s.includes('andamento')) return find(/andamento/) || stages[0].id;
+    if (s.includes('autorizad')) return find(/autorizad/) || stages[0].id;
+    if (s.includes('abert')) return find(/abert/) || stages[0].id;
+    if (s.includes('pendente')) return find(/pendente/) || stages[0].id;
+    return stages.find(st => !st.is_terminal)?.id || stages[0].id;
+  };
+
+  // Janela: últimos 12 meses por data de ocorrência
+  const { sinistros } = await listSinistros({ data_inicial: daysAgoStr(365), data_final: todayStr() });
+  if (sinistros.length === 0) return result;
+
+  // Mapa apólice (doc_) → contato, e sinistros já sincronizados
+  const docIds = sinistros.map(s => `doc_${s.codfil}_${s.nosnum}`);
+  const { data: docDeals } = await sb.from('marpe_deals')
+    .select('corp_id, contact_id').in('corp_id', docIds);
+  const contactByDoc = new Map((docDeals || []).map(d => [d.corp_id, d.contact_id]));
+  const { data: existing } = await sb.from('marpe_deals')
+    .select('id, corp_id').like('corp_id', 'sin_%');
+  const existingMap = new Map((existing || []).map(d => [d.corp_id, d.id]));
+
+  for (const s of sinistros) {
+    const corpId = `sin_${s.codfil}_${s.numsin || `${s.nosnum}_${s.item}`}`;
+    const contactId = contactByDoc.get(`doc_${s.codfil}_${s.nosnum}`);
+    if (!contactId) { result.skipped++; continue; }
+
+    const encerrado = !!s.datenc;
+    const fields = {
+      contact_id: contactId,
+      ramo: s.ramo?.toLowerCase() || null,
+      seguradora: s.cia || null,
+      apolice: s.numapo || null,
+      placa: s.placa || null,
+      deal_type: 'prospeccao',
+      next_action_date: parseCorpDate(s.proxima_agenda || s.agendamento || null),
+      next_action: s.tipo_atendimento || (encerrado ? null : 'Acompanhar sinistro'),
+      stage_id: stageFor(s.situacao, encerrado),
+      detalhes_corp: {
+        numsin: s.numsin, situacao: s.situacao, datoco: s.datoco, datavi: s.datavi,
+        datenc: s.datenc, franquia: s.franquia, responsavel: s.responsavel,
+        oficina: s.oficina, descricao: s.descricao, observacoes: s.observacoes,
+        valavi: s.valavi, valind: s.valind, tipo_atendimento: s.tipo_atendimento,
+      },
+    };
+
+    const existingId = existingMap.get(corpId);
+    if (existingId) {
+      const { error } = await sb.from('marpe_deals').update(fields).eq('id', existingId);
+      if (error) result.errors.push(`Update sin ${s.numsin}: ${error.message}`);
+      else result.updated++;
+    } else {
+      const { error } = await sb.from('marpe_deals').insert({
+        ...fields,
+        funnel_id: funil.id,
+        title: `SINISTRO ${s.ramo || ''} — ${s.segurado || 'Segurado'}`.trim(),
+        corp_id: corpId,
+      });
+      if (error) result.errors.push(`Insert sin ${s.numsin}: ${error.message}`);
+      else result.created++;
+    }
   }
 
   return result;
@@ -737,6 +866,7 @@ export async function syncAll(): Promise<SyncResult[]> {
   results.push(await syncClientes());
   results.push(await syncDocumentos(datini, datfim));
   results.push(await syncNegocios());
+  results.push(await syncSinistros());
 
   // Log to marpe_corp_sync_log
   for (const r of results) {

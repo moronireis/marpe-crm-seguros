@@ -1,6 +1,5 @@
 import type { APIRoute } from 'astro';
-import { syncNegocios } from '../../../lib/corp/sync';
-import { logCorpSync } from '../../../lib/corp/sync';
+import { syncNegocios, syncSinistros, logCorpSync } from '../../../lib/corp/sync';
 import { createServerClient } from '../../../lib/supabase-server';
 
 export const prerender = false;
@@ -31,6 +30,8 @@ export const GET: APIRoute = async ({ request, url }) => {
 
   try {
     const result = await syncNegocios({ withDetail: true, reconcileDryRun: dryRun });
+    // S4.1 (issue #27): sinistros entram no ciclo diurno (1 chamada de lista, barato)
+    const sinistros = await syncSinistros().catch(e => ({ type: 'sinistros', created: 0, updated: 0, skipped: 0, errors: [String(e?.message || e)] }));
 
     const sb = createServerClient();
     await logCorpSync(sb, {
@@ -54,6 +55,12 @@ export const GET: APIRoute = async ({ request, url }) => {
         errors: result.errors.slice(0, 5),
       },
       reconcile: result.reconcile || null,
+      sinistros: {
+        created: sinistros.created,
+        updated: sinistros.updated,
+        skipped: sinistros.skipped,
+        errors: sinistros.errors.slice(0, 3),
+      },
     }), { status: 200 });
   } catch (e: any) {
     return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 200 });

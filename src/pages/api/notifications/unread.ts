@@ -22,19 +22,20 @@ export const GET: APIRoute = async ({ locals }) => {
   const sb = createServerClient();
 
   // ── 1. Unread conversations ──────────────────────────────────────────────
-  // Fetch all messages ordered newest first, deduplicate by contact,
-  // then count those whose latest message is inbound.
-  // Exclude group contacts (source = 'whatsapp_group').
+  // S3.5 (issue #3): mesmo modelo do filtro "Não lidas" do Inbox — última mensagem
+  // é inbound E mais recente que inbox_read_at (marcada ao abrir a conversa).
+  // Antes o badge usava só "última é inbound": a conversa contava até alguém
+  // RESPONDER, mesmo já lida. Grupos continuam fora.
 
-  const [messagesResult, groupContactsResult] = await Promise.all([
+  const [messagesResult, contactsResult] = await Promise.all([
     sb
       .from('marpe_messages')
       .select('contact_id, direction, created_at')
       .order('created_at', { ascending: false }),
     sb
       .from('marpe_contacts')
-      .select('id')
-      .eq('source', 'whatsapp_group'),
+      .select('id, source, inbox_read_at')
+      .not('id', 'is', null),
   ]);
 
   if (messagesResult.error) {
@@ -44,8 +45,8 @@ export const GET: APIRoute = async ({ locals }) => {
     );
   }
 
-  const groupIds = new Set<string>(
-    (groupContactsResult.data || []).map((c: { id: string }) => c.id)
+  const contactInfo = new Map<string, { source: string | null; inbox_read_at: string | null }>(
+    (contactsResult.data || []).map((c: any) => [c.id, { source: c.source, inbox_read_at: c.inbox_read_at }])
   );
 
   // Deduplicate: keep the most recent message per contact
@@ -56,11 +57,10 @@ export const GET: APIRoute = async ({ locals }) => {
     if (seen.has(msg.contact_id)) continue;
     seen.add(msg.contact_id);
 
-    // Skip group contacts
-    if (groupIds.has(msg.contact_id)) continue;
+    const info = contactInfo.get(msg.contact_id);
+    if (info?.source === 'whatsapp_group') continue;
 
-    // Latest message is inbound → client is waiting
-    if (msg.direction === 'inbound') {
+    if (msg.direction === 'inbound' && (!info?.inbox_read_at || msg.created_at > info.inbox_read_at)) {
       unreadConversations++;
     }
   }

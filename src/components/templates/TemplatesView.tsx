@@ -56,6 +56,15 @@ const VARIABLES_NEGOCIO = [
   { token: '{{proxima_acao}}', label: 'Próxima ação' },
 ];
 
+// S4.2 (issue #18): variáveis do funil de Sinistros (populadas pelo sync do Corp)
+const VARIABLES_SINISTRO = [
+  { token: '{{numero_sinistro}}', label: 'Número do sinistro' },
+  { token: '{{situacao_sinistro}}', label: 'Situação do sinistro' },
+  { token: '{{data_ocorrencia}}', label: 'Data da ocorrência' },
+  { token: '{{franquia}}', label: 'Franquia' },
+  { token: '{{oficina}}', label: 'Oficina' },
+];
+
 const VARIABLES_SISTEMA = [
   { token: '{{periodo_dia}}', label: 'Período do dia' },
 ];
@@ -742,6 +751,38 @@ export default function TemplatesView() {
                               Negócio
                             </div>
                             {VARIABLES_NEGOCIO.map(v => (
+                              <button
+                                key={v.token}
+                                onClick={() => insertVariable(v.token)}
+                                title={v.label}
+                                style={{
+                                  display: 'block',
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  padding: '5px 8px',
+                                  borderRadius: 6,
+                                  border: 'none',
+                                  background: 'transparent',
+                                  cursor: 'pointer',
+                                  fontFamily: 'inherit',
+                                  marginBottom: 2,
+                                  transition: 'background 0.1s',
+                                }}
+                                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-secondary)')}
+                                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                              >
+                                <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--accent-light)' }}>{v.token}</span>
+                                <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 6 }}>{v.label}</span>
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Sinistro (S4.2, issue #18) */}
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+                              Sinistro
+                            </div>
+                            {VARIABLES_SINISTRO.map(v => (
                               <button
                                 key={v.token}
                                 onClick={() => insertVariable(v.token)}

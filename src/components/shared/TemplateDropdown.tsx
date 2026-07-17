@@ -47,7 +47,7 @@ export default function TemplateDropdown({ visible, filter, templates, onSelect,
 
   const filtered = filterTemplates(templates, filter);
   const boxStyle: React.CSSProperties = {
-    position: 'absolute', bottom: 'calc(100% + 10px)', left, right, zIndex: 50,
+    position: 'absolute', bottom: 'calc(100% + 10px)', left, right, zIndex: 90,
     borderRadius: 16,
   };
 

@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
+import { validPhone, validEmail } from '../../../lib/masks';
 
 export const prerender = false;
 
@@ -27,7 +28,7 @@ export const GET: APIRoute = async ({ locals, params }) => {
   const { data: deals } = await sb
     .from('marpe_deals')
     .select(`
-      id, title, ramo, seguradora, apolice, premio, comissao_pct, comissao_valor,
+      id, title, corp_id, ramo, seguradora, apolice, premio, comissao_pct, comissao_valor,
       vigencia_inicio, vigencia_fim, veiculo, placa, deal_type,
       next_action, next_action_date, status_custom, status_color,
       stage_id, funnel_id, created_at, updated_at, loss_reason,
@@ -72,8 +73,18 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 });
   }
 
+  // Validação de tipos no server (issue #12)
+  if ('phone' in body && !validPhone(String(body.phone || ''))) {
+    return new Response(JSON.stringify({ error: 'Telefone inválido — use DDD + número (10 ou 11 dígitos).' }), { status: 400 });
+  }
+  if ('email' in body && !validEmail(String(body.email || ''))) {
+    return new Response(JSON.stringify({ error: 'E-mail inválido.' }), { status: 400 });
+  }
+
   const allowed = ['name', 'phone', 'phone_secondary', 'email', 'city', 'state',
-    'address', 'birth_date', 'profession', 'marital_status', 'tags', 'notes', 'responsible_id'];
+    'address', 'birth_date', 'profession', 'marital_status', 'tags', 'notes', 'responsible_id',
+    // Sprint S3 (checkpoint 15/07): leitura, favorito e status da conversa
+    'inbox_read_at', 'pinned', 'conv_status'];
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const key of allowed) {

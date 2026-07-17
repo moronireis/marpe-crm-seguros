@@ -151,14 +151,32 @@ export async function getNegocioAnexos(codigo: number): Promise<CorpAnexo[]> {
 
 // ===== SINISTROS =====
 
+export interface CorpSinistro {
+  codfil: number; nosnum: number; tipo: string | null; cia: string | null;
+  ramo: string | null; codigo: number; numapo: string | null; numend: string | null;
+  item: number; valavi: number | null; valind: number | null; segurado: string | null;
+  numsin: string | null; datavi: string | null; datoco: string | null; datenc: string | null;
+  situacao: string | null; placa: string | null; franquia: number | null;
+  responsavel: string | null; oficina: string | null; tipo_atendimento: string | null;
+  descricao: string | null; observacoes: string | null; proxima_agenda: string | null;
+  agendamento: string | null;
+}
+
+// situacao='a' é o único valor validado (probe 17/07: 'p' → 404); sem sinistros
+// no período o Corp também responde 404 — tratado como lista vazia.
 export async function listSinistros(opts: {
   data_inicial: string; data_final: string;
-}): Promise<{ sinistros: any[] }> {
-  const data = await corpFetch<any>('/sinistros', {
-    tipo_sinistro: 'a', data_inicial: opts.data_inicial, data_final: opts.data_final,
-    tipo_data: 'oco', situacao: 'p', qtd_pag: '100', pagina: '1',
-  });
-  return { sinistros: data.sinistros || [] };
+}): Promise<{ sinistros: CorpSinistro[] }> {
+  try {
+    const data = await corpFetch<any>('/sinistros', {
+      tipo_sinistro: 'a', data_inicial: opts.data_inicial, data_final: opts.data_final,
+      tipo_data: 'oco', situacao: 'a', qtd_pag: '100', pagina: '1',
+    });
+    return { sinistros: data.sinistros || [] };
+  } catch (e) {
+    if (String(e).includes('404') || String(e).toLowerCase().includes('nenhum')) return { sinistros: [] };
+    throw e;
+  }
 }
 
 // ===== RAMOS =====

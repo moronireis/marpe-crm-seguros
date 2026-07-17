@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { maskPhone, maskCpfCnpj, maskCep, validPhone, validEmail, validCpfCnpj } from '../../lib/masks';
 
 // Cadastro de Novo Cliente integrado ao Corp: grava no Corp (cliente + telefone +
 // endereço + e-mail) e depois no CRM com o vínculo corp_id. Espelha a aba Cadastro
@@ -80,6 +81,10 @@ export default function NewContactModal({ onClose, onCreated }: {
     e.preventDefault();
     setError('');
     if (!form.name.trim()) { setError('Nome é obrigatório.'); return; }
+    // Validação de tipos (issue #12) — bloqueia telefone/e-mail/CPF inválidos
+    if (!validPhone(form.phone)) { setError('Telefone inválido — use DDD + número (10 ou 11 dígitos).'); return; }
+    if (!validEmail(form.email)) { setError('E-mail inválido.'); return; }
+    if (!validCpfCnpj(form.cpf_cnpj)) { setError('CPF/CNPJ inválido — confira os dígitos.'); return; }
     setSubmitting(true);
     const res = await fetch('/api/contacts', {
       method: 'POST',
@@ -146,7 +151,7 @@ export default function NewContactModal({ onClose, onCreated }: {
             </div>
             <div>
               <label style={LABEL_S}>{form.pessoa === 'J' ? 'CNPJ' : 'CPF'}</label>
-              <input value={form.cpf_cnpj} onChange={field('cpf_cnpj')} placeholder={form.pessoa === 'J' ? '00.000.000/0000-00' : '000.000.000-00'} style={INPUT_S} />
+              <input value={form.cpf_cnpj} onChange={e => setForm(f => ({ ...f, cpf_cnpj: maskCpfCnpj(e.target.value) }))} inputMode="numeric" placeholder={form.pessoa === 'J' ? '00.000.000/0000-00' : '000.000.000-00'} style={INPUT_S} />
             </div>
             <div>
               <label style={LABEL_S}>Nascimento</label>
@@ -175,7 +180,7 @@ export default function NewContactModal({ onClose, onCreated }: {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
               <label style={LABEL_S}>Telefone (WhatsApp)</label>
-              <input value={form.phone} onChange={field('phone')} placeholder="(55) 99999-9999" style={INPUT_S} />
+              <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: maskPhone(e.target.value) }))} inputMode="tel" placeholder="(55) 99999-9999" style={INPUT_S} />
             </div>
             <div>
               <label style={LABEL_S}>E-mail</label>
@@ -189,7 +194,7 @@ export default function NewContactModal({ onClose, onCreated }: {
             <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 90px', gap: 12 }}>
               <div>
                 <label style={LABEL_S}>CEP {cepLoading && <span style={{ color: 'var(--accent-light)' }}>…</span>}</label>
-                <input value={form.cep} onChange={e => handleCepChange(e.target.value)} placeholder="00000-000" style={INPUT_S} />
+                <input value={form.cep} onChange={e => handleCepChange(maskCep(e.target.value))} inputMode="numeric" placeholder="00000-000" style={INPUT_S} />
               </div>
               <div>
                 <label style={LABEL_S}>Endereço</label>

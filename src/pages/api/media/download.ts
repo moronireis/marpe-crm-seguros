@@ -6,9 +6,14 @@ export const prerender = false;
 
 /**
  * GET /api/media/download?msgid=WA_MESSAGE_ID
- * Proxies media files from UazapiGO using server-side token auth.
- * Used as fallback when media_url is not stored in DB (e.g. webhook didn't receive base64
- * and the direct URL from UazapiGO requires auth that the browser can't supply).
+ * Fallback de mídia quando a mensagem não tem media_url persistida (ou tem URL
+ * inválida do CDN do WhatsApp — expira e é criptografada).
+ *
+ * Reescrito 17/07 (issue #21): usa a rota REAL da UazapiGO
+ * (POST /message/download { id } → { fileURL, mimetype }, arquivo já
+ * descriptografado) e é SELF-HEALING — persiste a mídia recuperada no Storage e
+ * atualiza a mensagem, para os próximos acessos serem diretos.
+ * Mídia irrecuperável → 410 (o front mostra "Mídia expirada").
  */
 export const GET: APIRoute = async ({ locals, url }) => {
   const profile = requireAuth(locals);
@@ -17,53 +22,93 @@ export const GET: APIRoute = async ({ locals, url }) => {
   const msgId = url.searchParams.get('msgid');
   if (!msgId) return new Response('Missing msgid', { status: 400 });
 
-  const UAZAPI_URL = import.meta.env.UAZAPI_URL || 'https://u4digital.uazapi.com';
-  const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN || '';
+  const UAZAPI_URL = (import.meta.env.UAZAPI_URL || 'https://u4digital.uazapi.com').trim();
+  const UAZAPI_TOKEN = (import.meta.env.UAZAPI_TOKEN || '').trim();
+  const sb = createServerClient();
 
-  // Try UazapiGO download endpoint
-  // UazapiGO download media: GET /download/media?token=TOKEN&messageId=MSGID
-  let res: Response | null = null;
-  const endpoints = [
-    `${UAZAPI_URL}/download/media?token=${UAZAPI_TOKEN}&messageId=${encodeURIComponent(msgId)}`,
-    `${UAZAPI_URL}/messages/media?token=${UAZAPI_TOKEN}&messageId=${encodeURIComponent(msgId)}`,
-  ];
+  const { data: msg } = await sb
+    .from('marpe_messages')
+    .select('id, contact_id, media_url, media_mime, metadata')
+    .eq('wa_message_id', msgId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  for (const endpoint of endpoints) {
-    try {
-      const r = await fetch(endpoint, { headers: { token: UAZAPI_TOKEN } });
-      if (r.ok) { res = r; break; }
-    } catch (_) {}
+  // URL persistida no Storage → redireciona direto (whatsapp.net NÃO conta:
+  // conteúdo criptografado/expirado)
+  if (msg?.media_url && !msg.media_url.includes('whatsapp.net')) {
+    return new Response(null, { status: 302, headers: { Location: msg.media_url } });
   }
 
-  if (!res || !res.ok) {
-    // As last resort, look up media_url from DB
-    const sb = createServerClient();
-    const { data: msg } = await sb
-      .from('marpe_messages')
-      .select('media_url')
-      .eq('wa_message_id', msgId)
-      .maybeSingle();
+  // Já marcado como expirado em tentativa anterior → não bater na UazapiGO de novo
+  if (msg?.metadata?.media_expired) {
+    return new Response('Mídia expirada', { status: 410 });
+  }
 
-    if (msg?.media_url) {
-      // Redirect to the stored URL
-      return new Response(null, {
-        status: 302,
-        headers: { Location: msg.media_url },
-      });
+  // Recupera da UazapiGO
+  let fileURL: string | null = null;
+  let mimetype: string | null = null;
+  try {
+    const dlRes = await fetch(`${UAZAPI_URL}/message/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', token: UAZAPI_TOKEN },
+      body: JSON.stringify({ id: msgId }),
+    });
+    if (dlRes.ok) {
+      const dlData: any = await dlRes.json().catch(() => null);
+      fileURL = dlData?.fileURL || null;
+      mimetype = dlData?.mimetype || null;
     }
+  } catch (_) { /* trata abaixo */ }
 
-    return new Response('Media not found', { status: 404 });
+  if (!fileURL) {
+    // Irrecuperável: marca para não re-tentar a cada render
+    if (msg?.id) {
+      await sb.from('marpe_messages').update({
+        media_url: null,
+        metadata: { ...(msg.metadata || {}), media_expired: true },
+      }).eq('id', msg.id);
+    }
+    return new Response('Mídia expirada', { status: 410 });
   }
 
-  const contentType = res.headers.get('content-type') || 'application/octet-stream';
-  const contentLength = res.headers.get('content-length');
-  const data = await res.arrayBuffer();
+  const fileRes = await fetch(fileURL).catch(() => null);
+  if (!fileRes || !fileRes.ok) return new Response('Falha ao baixar mídia', { status: 502 });
 
-  const headers: Record<string, string> = {
-    'Content-Type': contentType,
-    'Cache-Control': 'public, max-age=86400, immutable',
-  };
-  if (contentLength) headers['Content-Length'] = contentLength;
+  const contentType = (mimetype || fileRes.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
+  const bytes = Buffer.from(await fileRes.arrayBuffer());
 
-  return new Response(data, { status: 200, headers });
+  // Self-healing: persiste no Storage e atualiza a mensagem (best-effort — se o
+  // storage falhar (RLS intermitente Cloudfy), ainda serve os bytes desta vez)
+  if (msg?.id && msg.contact_id) {
+    const ext = contentType.includes('jpeg') ? 'jpg'
+      : contentType.includes('png') ? 'png'
+      : contentType.includes('webp') ? 'webp'
+      : contentType.includes('ogg') ? 'ogg'
+      : contentType.includes('mpeg') ? 'mp3'
+      : contentType.includes('mp4') && contentType.startsWith('audio') ? 'm4a'
+      : contentType.includes('mp4') ? 'mp4'
+      : contentType.includes('pdf') ? 'pdf'
+      : 'bin';
+    const filePath = `${msg.contact_id}/${msgId}.${ext}`;
+    const { error: upErr } = await sb.storage
+      .from('marpe-media')
+      .upload(filePath, bytes, { contentType, upsert: true });
+    if (!upErr) {
+      const { data: urlData } = sb.storage.from('marpe-media').getPublicUrl(filePath);
+      await sb.from('marpe_messages').update({
+        media_url: urlData.publicUrl,
+        media_mime: contentType,
+      }).eq('id', msg.id);
+    }
+  }
+
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': String(bytes.length),
+      'Cache-Control': 'private, max-age=3600',
+    },
+  });
 };
