@@ -1,8 +1,45 @@
 # Plano — Checkpoint 15/07: Sincronização Corp→CRM + Formulários + Inbox
 
-> Última atualização: 15/07/2026
-> Origem: feedback Marpe 15/07 (mensagem + PDF "Marpe - Ajustes.pdf" + PDF "Marpe - Ajustes Módulo Inbox.pdf")
-> Status: **S1 EM PRODUÇÃO (15/07, E2E completo)** — S2 e S3 planejados
+> Última atualização: 17/07/2026
+> Origem: feedback Marpe 15/07 (mensagem + 2 PDFs) + **board u4digital** (github.com/orgs/u4digital/projects/3, 26 issues em u4digital/Marpe-Project, mapeadas 17/07)
+> Status: **S1 EM PRODUÇÃO (15/07, E2E completo)** — S2, S3 e S4 planejados
+
+---
+
+## 0. Board u4digital (17/07) — mapeamento das 26 issues
+
+O board "Marpe" da u4digital consolida o feedback do cliente em issues no repo
+`u4digital/Marpe-Project`. Mapeamento completo → sprint deste plano:
+
+| Issue | Título (resumo) | Situação | Sprint |
+|-------|-----------------|----------|--------|
+| #16 | Atraso na sincronização Corp→CRM | ✅ **RESOLVIDA 15/07** (S1 em prod) | fechar |
+| #17 | Exclusão no Corp não reflete no CRM | ✅ **RESOLVIDA 15/07** (S1 em prod) | fechar |
+| #15 | Negociação criada no Corp (mesmo dia) não aparece | ◐ S1 resolve em ≤30 min, **exceto cliente novo no mesmo dia** (contato ainda não existe → deal pulado até o cron noturno; é o `skipped:1` dos logs) | **S1.5** |
+| #9–#14 | Formulários: aba Corp, ordenação, apólice, tipos de campo, seguradora dropdown, Vr. Comissão | Planejadas | S2.1–S2.6 |
+| #20 | Filtro "Próxima ação" no board (presets do Corp: Todas/Hoje/Esta Semana/Este Mês/Próximos/Atraso de/Personalizado) | **Nova** | **S2.7** |
+| #26 | Gatilho "/" de templates não aciona nas Conversas | **Verificar em prod** (TemplateDropdown existe no Inbox e no painel — reproduzir 1º) | **S2.8** |
+| #21 | Inbox não abre imagem nem áudio | **BUG diagnosticado 17/07** (ver S3.0-B) | **S3.0-B (hotfix)** |
+| #1 | Enviar áudio pelo chat | Planejada | S3.2 |
+| #2 | Dados do Contato oculto por padrão | Planejada | S3.4 |
+| #3 | Filtro "Não lidas" | Planejada | S3.5 |
+| #5 | Menu de anexos "+" completo | Planejada (Documento/Fotos/Vídeos/Câmera = S3.1; Enquete/Evento/Figurinha/Catálogo **não existem via UazapiGO** — ver S3.1) | S3.1 |
+| #6 | "[Nome]" enviado junto da imagem em grupo | Planejada | S3.6 |
+| #7 | Colar imagem na caixa de texto | Planejada | S3.3 |
+| #4 | Menu de opções do chat estilo waSpeed (etiquetas, favoritar, transferir, finalizar...) | Ampliada | **S3.8** + decisões |
+| #8 | Menções @ mostram ID numérico e perdem formatação | **Nova (bug)** | **S3.9** |
+| #18 | Variáveis Corp/Inbox/CRM para templates e mensagens rápidas | **Nova** | **S4.2** |
+| #27 | Funil de Sinistros: interface e consulta | Já prevista no Sprint C do checkpoint 10/07 | **S4.1** |
+| #22 | Cliente HTTP para API do Corp *(descrita como Laravel)* | ✅ **JÁ EXISTE** — `src/lib/corp/client.ts` (25+ endpoints, token com renovação) | fechar |
+| #23 | Formulário Novo Negócio com lookups *(descrita como Nuxt)* | ✅ **JÁ EXISTE** — modal Novo Negócio + `/api/corp/lookups` | fechar |
+| #24 | Dupla persistência de Novo Negócio | ✅ **JÁ EXISTE** — dual-write no `POST /api/deals` (ligado desde 09/07, com rollback) | fechar |
+| #25 | Cadastro de Novo Cliente CRM→Corp | ✅ **JÁ EXISTE** — NewContactModal (cliente+telefone+endereço+e-mail no Corp, rollback) | fechar |
+
+> **⚠️ Nota de stack**: as issues #22–#25 descrevem o CRM como **Laravel + Nuxt** — o projeto
+> real é **Astro 6 + React 19 + Supabase** (ver DOCUMENTACAO.md). As 4 funcionalidades já
+> estão entregues e em produção no stack real. Recomendação: fechar com comentário
+> apontando onde cada uma vive no código, e alinhar com a equipe u4digital que novas
+> issues usem o repo/stack real como referência.
 
 ---
 
@@ -130,6 +167,15 @@ Registro do que a execução revelou/ajustou em relação ao planejado:
 - **Primeira reconciliação (backlog histórico)**: 195 candidatos acumulados desde 02/07 → 160 finalizados marcados (`corp_fora_andamento`) e **34 exclusões confirmadas removidas** (incluindo o deal de teste neg_1_7588). Teto de candidatos recalibrado 150→400 (a proteção real é a confirmação individual + cap de 30 exclusões/ciclo). Regime permanente atingido no mesmo dia: 4 candidatos/ciclo.
 - **E2E completo em prod**: negócio descartável criado no Corp → sync criou o deal → `refresh-deal` (vivo) `refreshed:true` → DELETE no Corp → `refresh-deal` detectou e removeu o deal → verificado ausente. Todos os passos OK.
 
+### S1.5 — Complemento pendente: cliente novo no mesmo dia (issue #15)
+
+O sync de negócios pula o negócio quando o **contato ainda não existe** no CRM (cliente
+criado no Corp no mesmo dia — só entra no cron noturno de clientes). Fix: no
+`syncNegocios`, quando `contactMap` não tiver o `codcli`, buscar `getCliente(codcli)` no
+Corp e criar o contato inline (mesmo mapeamento do `syncContactByCorpId`), aí inserir o
+deal normalmente. Resultado: negociação de cliente novo aparece no CRM em ≤30 min, igual
+às demais. Esforço: pequeno (cabe junto do hotfix S3.0-B).
+
 ---
 
 ## 4. Sprint S2 — Ajustes do PDF
@@ -180,9 +226,46 @@ Eliminar a degradação silenciosa para texto livre:
 - **Dual-write**: incluir `val_c` e `val_r` no payload do `POST /negocio` (`src/lib/corp/negocio.ts` — hoje envia só `per_c`/`per_r`). Validar com registro descartável (POST→GET→DELETE) que o Corp aceita/retorna os valores.
 - Volta do Corp já funciona: o sync traz `val_c` pela lista e `val_r` pelo detalhe.
 
+### S2.7 — Filtro "Próxima ação" no board (issue #20)
+
+Replicar o filtro de período de próxima ação do Corp no board do CRM, com os mesmos
+presets: **Todas** (padrão), **Hoje**, **Esta Semana**, **Este Mês**, **Próximos**,
+**Atraso de** (vencidas há N dias) e **Personalizado** (intervalo de datas). Entra na
+barra de filtros existente do CrmBoard (filtragem client-side sobre `next_action_date`,
+mesmo padrão dos 7 filtros atuais).
+
+### S2.8 — Verificar gatilho "/" de templates nas Conversas (issue #26)
+
+O dropdown de templates via "/" existe no Inbox e na aba Conversas do painel
+(`TemplateDropdown` compartilhado, 17 templates em prod). A issue relata que "não está
+acionando" — reproduzir em prod (qual tela, qual navegador); se confirmado, corrigir o
+handler de teclado/estado. Até reproduzir, tratado como verificação, não como feature.
+
 ---
 
 ## 5. Sprint S3 — Módulo Inbox
+
+### S3.0-B — HOTFIX: imagem e áudio não abrem (issue #21) — diagnóstico 17/07
+
+**Diagnóstico feito em prod**: das 3.877 mensagens de mídia, apenas 21 estão sem
+`media_url` persistida no Storage (9 na última semana ≈ 0,5%) — o webhook falha
+intermitentemente ao salvar a mídia e essas mensagens caem no fallback "Ver Imagem"
+(proxy `/api/media/download` por `wa_message_id`), que tenta re-baixar da UazapiGO e
+falha quando a mídia do WhatsApp já expirou → link morto (vídeo da issue mostra
+exatamente isso, mensagem de 14/07). Mídias persistidas abrem normalmente (testado: 200).
+
+Fix em 3 frentes:
+1. **Webhook**: retry na persistência da mídia (2 tentativas + log da falha em vez de
+   engolir) para o fallback virar exceção rara; investigar o padrão dos 9 casos da
+   semana (tamanho? mime? timeout?).
+2. **Proxy de re-download**: corrigir/validar o endpoint de download da UazapiGO usado
+   pelo `/api/media/download`; quando a UazapiGO ainda tiver a mídia, baixar, persistir
+   no Storage e redirecionar (self-healing).
+3. **UI**: quando não houver mídia recuperável, mostrar estado claro ("Mídia expirada —
+   peça para reenviar") em vez de link que não faz nada; conferir o player de áudio no
+   mesmo cenário.
+
+Prioridade máxima da S3 — pode sair como hotfix junto do S1.5, antes do resto do sprint.
 
 ### S3.0 — Probe UazapiGO `/send/media` (pré-tarefa)
 
@@ -237,7 +320,59 @@ O que os destaques do print pedem, e onde cada um fica:
 
 **Proposta P-A — Mensagem agendada**: botão de relógio no composer → escolher data/hora → mensagem gravada em tabela `marpe_scheduled_messages` e enviada pelo runner interno (mesma infraestrutura de agendamento do S1.1). Esforço: ~0,5 sessão. Entra como S3.8 se aprovado.
 
-**Proposta P-B — Lembretes**: em vez de replicar o alarme do waSpeed, criar atalho "Lembrete" na conversa que preenche a próxima ação do negócio vinculado (ou cria notificação in-app com data). Reaproveita o que existe. Esforço: pequeno. Entra como S3.9 se aprovado.
+**Proposta P-B — Lembretes**: em vez de replicar o alarme do waSpeed, criar atalho "Lembrete" na conversa que preenche a próxima ação do negócio vinculado (ou cria notificação in-app com data). Reaproveita o que existe. Esforço: pequeno.
+
+### S3.8 — Opções de conversa estilo waSpeed (issue #4)
+
+A issue amplia o estudo do S3.7 com a barra de opções do waSpeed. Mapeamento e proposta:
+
+| Opção waSpeed | Situação/Proposta |
+|---------------|-------------------|
+| Respostas rápidas | ✅ Já existe (templates via "/") |
+| Organização por funil | ✅ Já existe (card ↔ conversa com deep-link) |
+| Etiquetas (atribuir/filtrar) | **Entra** — contatos já têm `tags`; adicionar atribuição na conversa + filtro por etiqueta na lista |
+| Favoritar conversa | **Entra** — coluna `pinned` no contato, fixa no topo da lista |
+| Finalizar conversa | **Entra** — status aberta/finalizada por conversa (reabre sozinha em nova mensagem), com filtro |
+| Encaminhar/exportar mensagem | **Entra (fase 2 do S3)** — encaminhar para outro contato via UazapiGO |
+| Transferir atendimento | **Decisão** — exige modelo de atendentes/atribuição de conversa (setores). Casa com o gap conhecido "filtro por setor/atendente". Esforço médio-alto → proposta P-C abaixo |
+| Tradução | **Fora** (baixo valor para o fluxo da corretora; reavaliar se o cliente insistir) |
+
+**Proposta P-C — Atribuição de atendimento**: dono por conversa (Marcel/Vanessa/Adria),
+transferir atendimento, filtro "minhas conversas". Esforço: ~1 sessão própria. Precisa OK.
+
+### S3.9 — Menções (@) não resolvem nome + formatação perdida (issue #8)
+
+Em grupos, menção aparece como `@236206122082483` em vez do nome, e negrito/marcadores
+do WhatsApp somem. Fix: (1) o webhook guarda o mapa de menções (`mentionedJidList`/
+participantes) no `metadata` da mensagem; render substitui `@<jid>` pelo nome do contato
+(lookup por telefone) ou pelo `sender_name` conhecido; (2) renderizador leve da
+formatação do WhatsApp no chat: `*negrito*`, `_itálico_`, `~tachado~`, `` `mono` `` e
+listas — aplicado nas bolhas (in e out).
+
+---
+
+## 5B. Sprint S4 — Sinistros e variáveis (novas issues do board)
+
+### S4.1 — Funil de Sinistros: interface e consulta (issue #27)
+
+O funil "Sinistros" já existe no CRM (etapas Pendente/Aberto/Em Andamento/Autorizado/
+Concluído) — falta populá-lo e dar entrada manual:
+1. **Sync**: `GET /sinistros` do Corp → deals no funil Sinistros (corp_id prefixo
+   `sin_`, etapa por situação), no cron noturno + diurno.
+2. **Botão "Registrar Sinistro"** no board: busca a apólice do cliente no Corp
+   (`/documentos` do contato), pré-preenche dados-base e cria o deal; discovery do
+   POST de sinistro na doc Postman para dual-write (se existir rota de escrita).
+3. Renovações (`GET /renovacoes` → funil Renovações) continuam previstas do Sprint C
+   do checkpoint 10/07 — mesmo mecanismo, entra junto se o tempo permitir.
+
+### S4.2 — Variáveis Corp/Inbox/CRM para templates (issue #18)
+
+Auditar e expandir o motor de 18 variáveis para cobrir os dados hoje disponíveis do
+Corp e o contexto de sinistros: catalogar variáveis por categoria (Contato, Negócio,
+Apólice, Sinistro, Sistema), expor no picker de variáveis dos templates (agrupado),
+garantir que mensagens rápidas e automações resolvam todas, e documentar a lista na
+tela de templates. Variáveis novas candidatas: `{{sinistro_numero}}`, `{{sinistro_situacao}}`,
+`{{apolice_seguradora}}`, `{{parcela_vencimento}}` (conforme dados do sync).
 
 ---
 
@@ -248,6 +383,8 @@ O que os destaques do print pedem, e onde cada um fica:
 3. **Frequência do sync diurno**: 30 min está bom, ou preferem 15 min? (15 min dobra o volume de chamadas na API do Corp — ver risco R1.)
 4. **Mensagem agendada (Proposta P-A)**: aprovam a inclusão? (~0,5 sessão a mais no S3)
 5. **Lembretes (Proposta P-B)**: aprovam o formato proposto (atalho → próxima ação/notificação) em vez de replicar o alarme do waSpeed?
+6. **Atribuição de atendimento (Proposta P-C, issue #4)**: querem o modelo de dono por conversa + transferir + "minhas conversas"? (~1 sessão própria)
+7. **Board u4digital**: posso fechar as issues já resolvidas/implementadas (#16, #17, #22–#25) com comentário técnico mapeando cada uma, e comentar o plano/sprint nas demais? (mantém o board da equipe do Tiago como espelho fiel do andamento)
 
 ---
 
@@ -264,19 +401,23 @@ O que os destaques do print pedem, e onde cada um fica:
 
 ---
 
-## 8. Ordem de execução e estimativa
+## 8. Ordem de execução e estimativa (revisada 17/07 com o board)
 
-| Etapa | Conteúdo | Estimativa |
-|-------|----------|-----------|
-| S1.0 | Probe `GET /negocio` inexistente + confirmação plano Vercel | 15 min |
-| S1 | Sync diurno + reconciliação de exclusões + refresh no card + board refetch | 1 sessão |
-| S2 | 6 ajustes do PDF 1 (P1–P6) | 1 sessão |
-| S3.0 | Probe UazapiGO `/send/media` (imagem, documento, áudio) | 30 min |
-| S3 | Inbox: mídia + áudio + colar imagem + painel oculto + filtro Não lidas + fix prefixo em grupos | 1,5–2 sessões |
-| S3.8/S3.9 | (Se aprovados) mensagem agendada + lembretes | +0,5 sessão |
-| QA | E2E em prod: editar/excluir negócio no Corp e cronometrar reflexo; criar negócio com valores e conferir no Corp; enviar áudio/imagem/documento e conferir no celular; validação conjunta com Tiago | 0,5 sessão |
+| Etapa | Conteúdo | Issues | Estimativa |
+|-------|----------|--------|-----------|
+| ~~S1~~ | ~~Sync diurno + reconciliação + refresh no card~~ | #16 #17 | ✅ feito 15/07 |
+| **HF** | Hotfix: mídia não abre (S3.0-B) + contato ausente no sync (S1.5) + verificar "/" (S2.8) | #21 #15 #26 | 0,5–1 sessão |
+| S2 | Formulários: P1–P6 + filtro Próxima ação | #9–#14 #20 | 1–1,25 sessão |
+| S3.0 | Probe UazapiGO `/send/media` (imagem, documento, áudio) | — | 30 min |
+| S3 | Inbox: mídia + áudio + colar + painel oculto + Não lidas + prefixo grupos + menções/formatação + etiquetas/favoritar/finalizar | #1–#8 | 2,5–3 sessões |
+| S4 | Funil Sinistros (sync + Registrar Sinistro) + variáveis de template | #27 #18 | 1 sessão |
+| P-A/P-B/P-C | (Se aprovados) msg agendada + lembretes + atribuição de atendimento | #4 parcial | +1,5 sessão |
+| QA | E2E por sprint + validação conjunta com Tiago | — | 0,5 sessão |
 
-Ordem: **S1 → S2 → S3**. S1 primeiro porque é o comportamento que o cliente está testando ativamente e o que mais mina confiança; S2 são correções rápidas de formulário; S3 é o bloco mais volumoso e depende do probe S3.0. Deploy de cada sprint separado, com validação do Tiago entre eles.
+Ordem: **HF → S2 → S3 → S4** (propostas P-* encaixam onde forem aprovadas). O hotfix
+vem primeiro porque mídia que não abre afeta o uso diário do Inbox. Deploy de cada
+bloco separado, com validação do Tiago entre eles. Total restante: **~5–6 sessões**
+(+1,5 se as 3 propostas forem aprovadas).
 
 ## 9. Critérios de aceite
 
@@ -294,3 +435,10 @@ Ordem: **S1 → S2 → S3**. S1 primeiro porque é o comportamento que o cliente
 - [ ] Painel Dados do Contato inicia oculto e abre pelo botão "Ver dados"
 - [ ] Filtro "Não lidas" lista só conversas com mensagem nova; abrir a conversa a marca como lida e o badge do menu acompanha
 - [ ] Imagem recebida em grupo mostra o remetente como rótulo, sem o texto "[Nome]" solto
+- [ ] Toda imagem/áudio recebido abre no Inbox; mídia irrecuperável mostra "Mídia expirada", nunca link morto (#21)
+- [ ] Negociação de cliente criado no Corp no mesmo dia aparece no CRM em ≤30 min (#15)
+- [ ] Menção @ em grupo mostra o nome do contato e negrito/itálico do WhatsApp renderizam (#8)
+- [ ] Board filtra por próxima ação com os presets do Corp (#20)
+- [ ] Conversas aceitam etiqueta, favorito e finalizar, com filtros correspondentes (#4)
+- [ ] Funil Sinistros populado pelo sync + botão Registrar Sinistro funcional (#27)
+- [ ] Picker de variáveis por categoria nos templates, com variáveis de sinistro/apólice (#18)
