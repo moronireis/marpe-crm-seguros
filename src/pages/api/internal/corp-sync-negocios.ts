@@ -21,8 +21,11 @@ export const GET: APIRoute = async ({ request, url }) => {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
   }
 
+  // S0 (22/07): falha aqui é falha DE VERDADE — retorna 500 para o curl -f do GitHub
+  // Actions ficar vermelho. O 200 {ok:false} antigo deixou o cron verde por 2 dias
+  // com o sync parado (login Corp 500 desde 21/07) e nada no corp_sync_log.
   if (!import.meta.env.CORP_API_URL || !import.meta.env.CORP_API_EMAIL || !import.meta.env.CORP_API_PASSWORD) {
-    return new Response(JSON.stringify({ ok: false, error: 'Corp credentials not configured.' }), { status: 200 });
+    return new Response(JSON.stringify({ ok: false, error: 'Corp credentials not configured.' }), { status: 500 });
   }
 
   const dryRun = url.searchParams.get('dry_run') === '1';
@@ -63,6 +66,17 @@ export const GET: APIRoute = async ({ request, url }) => {
       },
     }), { status: 200 });
   } catch (e: any) {
-    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 200 });
+    // S0 (22/07): registra a falha no corp_sync_log (antes só sucesso era logado —
+    // a quebra do login Corp em 21/07 ficou invisível) e responde 500 para o
+    // monitoramento externo (curl -f do GitHub Actions) acusar o problema.
+    try {
+      const sb = createServerClient();
+      await logCorpSync(sb, {
+        sync_type: 'negocios_day',
+        status: 'error',
+        message: String(e?.message || e).slice(0, 500),
+      });
+    } catch { /* log é best-effort */ }
+    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500 });
   }
 };

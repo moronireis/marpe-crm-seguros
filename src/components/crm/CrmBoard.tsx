@@ -221,6 +221,12 @@ const EMPTY_FILTERS: FilterState = {
   premioMin: '', premioMax: '', createdFrom: '', createdTo: '',
 };
 
+// Data LOCAL em yyyy-mm-dd. toISOString() é UTC: no Brasil (UTC-3) o dia virava
+// às 21h locais e o preset "Hoje" zerava à noite (issue #34).
+function localDateStr(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function countActiveFilters(f: FilterState): number {
   return (
     (f.responsavel.length > 0 ? 1 : 0) +
@@ -1377,9 +1383,48 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
   useEffect(() => {
     fetch('/api/funnels').then(r => r.json()).then(d => {
       setFunnels(d.funnels || []);
-      if (d.funnels?.length) setActiveFunnelId(d.funnels[0].id);
+      // #19: restaura o último funil aberto, se ainda existir
+      const saved = (() => { try { return JSON.parse(localStorage.getItem('marpe_crm_prefs_v1') || '{}'); } catch { return {}; } })();
+      const savedFunnel = d.funnels?.find((f: Funnel) => f.id === saved.activeFunnelId);
+      if (savedFunnel) setActiveFunnelId(savedFunnel.id);
+      else if (d.funnels?.length) setActiveFunnelId(d.funnels[0].id);
     });
   }, []);
+
+  // S0 (22/07): idade do último sync Corp — a quebra do login em 21/07 passou
+  // 2 dias invisível; agora o board avisa quando o dado está velho
+  const [syncStatus, setSyncStatus] = useState<{ hours: number | null; error: string | null } | null>(null);
+  useEffect(() => {
+    fetch('/api/corp/sync-status')
+      .then(r => r.json())
+      .then(d => setSyncStatus({ hours: d.stale_hours, error: d.last_error?.error_message || null }))
+      .catch(() => {});
+  }, []);
+  const syncStaleWarning = syncStatus && (syncStatus.hours === null || syncStatus.hours > 2);
+
+  // #19: persiste filtros e preferências de visualização — sem isso, sair da aba
+  // e voltar exigia refazer todos os filtros
+  const prefsHydrated = useRef(false);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('marpe_crm_prefs_v1') || '{}');
+      if (saved.filters) setFilters({ ...EMPTY_FILTERS, ...saved.filters });
+      if (typeof saved.sortRecentFirst === 'boolean') setSortRecentFirst(saved.sortRecentFirst);
+      if (saved.gradeSortDir === 'asc' || saved.gradeSortDir === 'desc') setGradeSortDir(saved.gradeSortDir);
+      if (saved.viewMode === 'kanban' || saved.viewMode === 'grade') setViewMode(saved.viewMode);
+      if (typeof saved.showOld === 'boolean') setShowOld(saved.showOld);
+      if (countActiveFilters({ ...EMPTY_FILTERS, ...(saved.filters || {}) }) > 0) setShowFilters(true);
+    } catch {}
+    prefsHydrated.current = true;
+  }, []);
+  useEffect(() => {
+    if (!prefsHydrated.current) return;
+    try {
+      localStorage.setItem('marpe_crm_prefs_v1', JSON.stringify({
+        filters, sortRecentFirst, gradeSortDir, viewMode, showOld, activeFunnelId,
+      }));
+    } catch {}
+  }, [filters, sortRecentFirst, gradeSortDir, viewMode, showOld, activeFunnelId]);
 
   // Load users for filter dropdown
   useEffect(() => {
@@ -1509,21 +1554,21 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
       if (filters.dateRange !== 'todos') {
         if (!d.next_action_date) return false;
         const nd = d.next_action_date.slice(0, 10);
-        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayStr = localDateStr();
         if (filters.dateRange === 'hoje' && nd !== todayStr) return false;
         if (filters.dateRange === 'semana') {
           const now = new Date();
           const dow = (now.getDay() + 6) % 7; // segunda = 0
           const monday = new Date(now); monday.setDate(now.getDate() - dow);
           const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
-          if (nd < monday.toISOString().slice(0, 10) || nd > sunday.toISOString().slice(0, 10)) return false;
+          if (nd < localDateStr(monday) || nd > localDateStr(sunday)) return false;
         }
         if (filters.dateRange === 'mes' && nd.slice(0, 7) !== todayStr.slice(0, 7)) return false;
         if (filters.dateRange === 'proximos' && nd <= todayStr) return false;
         if (filters.dateRange === 'atraso') {
           const dias = parseInt(filters.atrasoDias) || 1;
           const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - dias);
-          if (nd > cutoff.toISOString().slice(0, 10)) return false;
+          if (nd > localDateStr(cutoff)) return false;
         }
         if (filters.dateRange === 'custom') {
           if (filters.proxFrom && nd < filters.proxFrom) return false;
@@ -1825,6 +1870,19 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
             ))}
           </div>
         </div>
+
+        {/* ── S0: alerta de sync Corp parado (>2h sem sucesso) ── */}
+        {syncStaleWarning && (
+          <div style={{ display: 'flex', alignItems: 'center', padding: '8px 20px 0', flexShrink: 0 }}>
+            <span className="fade-in" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 600, color: '#fca5a5', background: 'rgba(239,68,68,0.09)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 999, padding: '4px 12px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              {syncStatus?.hours === null
+                ? 'Sincronização com o Corp sem registro de execução'
+                : `Dados do Corp sem atualização há ${syncStatus!.hours! >= 48 ? `${Math.round(syncStatus!.hours! / 24)} dias` : `${Math.round(syncStatus!.hours!)}h`}`}
+              <a href="/config" style={{ color: '#fca5a5', textDecoration: 'underline', fontWeight: 500 }}>ver Config</a>
+            </span>
+          </div>
+        )}
 
         {/* ── Chip da janela de recência (item 11 — legenda de ramos removida, item 4) ── */}
         {!loading && oldCount > 0 && !isFiltering && (

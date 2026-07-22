@@ -10,6 +10,20 @@ interface Activity {
 interface Props {
   activities: Activity[];
   users?: Record<string, string>; // id -> full_name map
+  /** #36/U6: atendimentos do Corp (detalhes_corp.atendimentos) exibidos na timeline */
+  corpAtendimentos?: Array<{
+    codigo: number; tipo_atendimento: string | null; data: string | null; hora: string | null;
+    canal: number | string | null; datinc: string | null; usuinc: string | null;
+    descricao: string | null; realizado: string | null; tipo: string | null;
+  }>;
+}
+
+// "dd/mm/yyyy" (+ "hh:mm") → ISO local, para ordenar junto das atividades do CRM
+function corpDateToISO(data: string | null, hora: string | null): string {
+  const m = (data || '').match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return '1970-01-01T00:00:00';
+  const hm = (hora || '').match(/^(\d{2}):(\d{2})/);
+  return `${m[3]}-${m[2]}-${m[1]}T${hm ? `${hm[1]}:${hm[2]}` : '00:00'}:00`;
 }
 
 const TYPE_ICONS: Record<string, string> = {
@@ -25,6 +39,7 @@ const TYPE_ICONS: Record<string, string> = {
   document_delete: '⬇',
   assignment: '→',
   loss: '✕',
+  corp_atendimento: '☎',
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -40,6 +55,7 @@ const TYPE_LABELS: Record<string, string> = {
   document_delete: 'Documento Removido',
   assignment: 'Atribuição',
   loss: 'Perda',
+  corp_atendimento: 'Atendimento Corp',
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -51,10 +67,22 @@ const TYPE_COLORS: Record<string, string> = {
   document_upload: '#4ade80',
   document_delete: '#f87171',
   loss: '#f87171',
+  corp_atendimento: '#2dd4bf',
 };
 
-export default function DealTabAtividades({ activities, users }: Props) {
-  if (!activities || activities.length === 0) {
+export default function DealTabAtividades({ activities, users, corpAtendimentos }: Props) {
+  // #36/U6: atendimentos do Corp entram na timeline como itens read-only
+  const corpItems: Activity[] = (corpAtendimentos || []).map(a => ({
+    id: `corp_${a.codigo}`,
+    type: 'corp_atendimento',
+    description: [a.tipo_atendimento, a.descricao].filter(Boolean).join(' — ') || 'Atendimento registrado no Corp',
+    created_at: corpDateToISO(a.data || a.datinc, a.hora),
+    metadata: { corp_usuinc: a.usuinc, corp_canal: a.canal, corp_realizado: a.realizado },
+    user_id: null,
+  }));
+
+  const all = [...(activities || []), ...corpItems];
+  if (all.length === 0) {
     return (
       <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>
         Nenhuma atividade registrada.
@@ -62,7 +90,7 @@ export default function DealTabAtividades({ activities, users }: Props) {
     );
   }
 
-  const sorted = [...activities].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const sorted = all.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -99,6 +127,11 @@ export default function DealTabAtividades({ activities, users }: Props) {
                 {userName && (
                   <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                     por {userName}
+                  </span>
+                )}
+                {act.type === 'corp_atendimento' && act.metadata?.corp_usuinc && (
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                    por {act.metadata.corp_usuinc}
                   </span>
                 )}
               </div>

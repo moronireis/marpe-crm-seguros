@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
 import { maskPhone, validPhone, validEmail } from '../../lib/masks';
 import { interpolateVariables } from '../../lib/variables';
@@ -546,6 +547,19 @@ export default function InboxView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputKind = useRef<'document' | 'media'>('media');
 
+  // ── Board 22/07 ───────────────────────────────────────────────────────────
+  // #38: arquivos além do primeiro (envio sequencial multi-arquivo)
+  const [attachQueue, setAttachQueue] = useState<Array<{ kind: 'image' | 'video' | 'document'; dataURI: string; mime: string; filename: string }>>([]);
+  const [mediaProgress, setMediaProgress] = useState('');
+  // #30: a API agora devolve a janela mais recente — botão "Carregar anteriores"
+  const [hasMoreMsgs, setHasMoreMsgs] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const msgListRef = useRef<HTMLDivElement>(null);
+  // #32: encaminhar mensagem para outro contato
+  const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+  // #5: câmera no menu de anexos (mobile abre a câmera via capture)
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
   // Não lida = última msg é inbound E mais recente que a marca de leitura persistida
   // (inbox_read_at — migração 20260717); o Set da sessão dá resposta otimista.
   const isUnread = useCallback((c: any) =>
@@ -585,7 +599,7 @@ export default function InboxView() {
     }).catch(() => patchContactLocal(c.id, { conv_status: c.conv_status }));
   }
 
-  // S3.1: arquivo escolhido/colado → preview com legenda antes do envio
+  // S3.1: arquivo escolhido/colado → preview antes do envio
   function fileToPreview(f: File, forceKind?: 'document') {
     if (f.size > 45 * 1024 * 1024) { setMediaError('Arquivo acima de 45 MB.'); return; }
     const kind = forceKind ? 'document'
@@ -600,10 +614,25 @@ export default function InboxView() {
     reader.readAsDataURL(f);
   }
 
+  // #38: seleção múltipla — o 1º arquivo vira o preview, os demais entram na fila
+  // e são enviados em sequência no mesmo clique de Enviar.
   function onFilesPicked(files: FileList | null) {
-    const f = files?.[0];
-    if (!f) return;
-    fileToPreview(f, fileInputKind.current === 'document' ? 'document' : undefined);
+    const list = Array.from(files || []).slice(0, 10);
+    if (list.length === 0) return;
+    const forceKind = fileInputKind.current === 'document' ? 'document' as const : undefined;
+    fileToPreview(list[0], forceKind);
+    const rest = list.slice(1).filter(f => f.size <= 45 * 1024 * 1024);
+    if (rest.length < list.length - 1) setMediaError('Arquivos acima de 45 MB foram ignorados.');
+    Promise.all(rest.map(f => new Promise<{ kind: 'image' | 'video' | 'document'; dataURI: string; mime: string; filename: string }>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({
+        kind: forceKind || (f.type.startsWith('image/') ? 'image' : f.type.startsWith('video/') ? 'video' : 'document'),
+        dataURI: String(reader.result),
+        mime: f.type || 'application/octet-stream',
+        filename: f.name,
+      });
+      reader.readAsDataURL(f);
+    }))).then(items => setAttachQueue(items));
   }
 
   // S3.2: gravação de áudio (MediaRecorder → UazapiGO transcodifica p/ voz)
@@ -639,36 +668,52 @@ export default function InboxView() {
     mediaRecRef.current = null;
   }
 
+  // #35: a legenda agora é o texto do composer principal (campo único);
+  // #38: envia o preview + a fila em sequência; #31: devolve o foco ao composer.
   async function sendMedia() {
     if (!attachPreview || !activeContact || sendingMedia) return;
     setSendingMedia(true);
     setMediaError('');
-    try {
-      const res = await fetch('/api/messages/media', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contact_id: activeContact.id,
-          phone: activeContact.phone,
-          kind: attachPreview.kind,
-          data: attachPreview.dataURI,
-          filename: attachPreview.filename,
-          caption: attachPreview.caption || undefined,
-        }),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setMediaError(d.error || 'Falha no envio da mídia.');
-      } else {
-        setAttachPreview(null);
+    const items = [attachPreview, ...attachQueue];
+    const caption = newMsg.trim();
+    let failed = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (items.length > 1) setMediaProgress(`Enviando ${i + 1}/${items.length}…`);
+      try {
+        const res = await fetch('/api/messages/media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contact_id: activeContact.id,
+            phone: activeContact.phone,
+            kind: items[i].kind,
+            data: items[i].dataURI,
+            filename: items[i].filename,
+            // legenda só no primeiro arquivo (mesmo comportamento do WhatsApp)
+            caption: i === 0 && caption && items[i].kind !== 'audio' ? caption : undefined,
+          }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { failed++; setMediaError(d.error || 'Falha no envio da mídia.'); }
+      } catch {
+        failed++;
+        setMediaError('Erro de rede ao enviar a mídia.');
+      }
+    }
+    setMediaProgress('');
+    if (failed === 0) {
+      setAttachPreview(null);
+      setAttachQueue([]);
+      if (caption) { setNewMsg(''); if (inputRef.current) inputRef.current.style.height = 'auto'; }
+      try {
         const r = await fetch(`/api/messages?contact_id=${activeContact.id}`);
         const md = await r.json();
         setMessages(md.messages || []);
-      }
-    } catch {
-      setMediaError('Erro de rede ao enviar a mídia.');
+        setHasMoreMsgs(!!md.has_more);
+      } catch {}
     }
     setSendingMedia(false);
+    inputRef.current?.focus();
   }
 
   // Check WhatsApp connection status
@@ -714,33 +759,63 @@ export default function InboxView() {
   useEffect(() => {
     if (!activeContactId) return;
     setLoadingMsgs(true);
+    setHasMoreMsgs(false);
     fetch(`/api/messages?contact_id=${activeContactId}`)
       .then(r => r.json())
-      .then(d => { setMessages(d.messages || []); setLoadingMsgs(false); })
+      .then(d => { setMessages(d.messages || []); setHasMoreMsgs(!!d.has_more); setLoadingMsgs(false); })
       .catch(() => setLoadingMsgs(false));
   }, [activeContactId]);
 
-  // Scroll to bottom on new messages
+  // #30: carrega a janela anterior de mensagens preservando a posição do scroll
+  async function loadOlderMessages() {
+    if (!activeContactId || loadingOlder || messages.length === 0) return;
+    setLoadingOlder(true);
+    try {
+      const r = await fetch(`/api/messages?contact_id=${activeContactId}&before=${encodeURIComponent(messages[0].created_at)}`);
+      const d = await r.json();
+      const older: Message[] = d.messages || [];
+      const list = msgListRef.current;
+      const prevHeight = list?.scrollHeight || 0;
+      setMessages(prev => [...older, ...prev]);
+      setHasMoreMsgs(!!d.has_more);
+      requestAnimationFrame(() => {
+        if (list) list.scrollTop = list.scrollHeight - prevHeight + list.scrollTop;
+      });
+    } catch {}
+    setLoadingOlder(false);
+  }
+
+  // Scroll to bottom on new messages — só quando a ÚLTIMA mensagem muda
+  // (#30: prepend de "Carregar anteriores" não pode jogar o scroll para o fim)
+  const lastMsgId = messages[messages.length - 1]?.id;
   useEffect(() => {
     msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [lastMsgId]);
 
-  // Poll for new messages every 3s — compares last message ID, not count
+  // Poll for new messages every 3s — compares last message ID, not count.
+  // #30: mescla apenas as mensagens NOVAS no fim, preservando janelas antigas
+  // carregadas via "Carregar anteriores".
   useEffect(() => {
     if (!activeContactId) return;
     const interval = setInterval(() => {
       fetch(`/api/messages?contact_id=${activeContactId}`)
         .then(r => r.json())
         .then(d => {
-          const incoming = d.messages || [];
-          const lastId = messages[messages.length - 1]?.id;
-          const incomingLastId = incoming[incoming.length - 1]?.id;
-          if (incomingLastId !== lastId) setMessages(incoming);
+          const incoming: Message[] = d.messages || [];
+          if (incoming.length === 0) return;
+          setMessages(prev => {
+            const prevLastId = prev[prev.length - 1]?.id;
+            if (incoming[incoming.length - 1]?.id === prevLastId) return prev;
+            if (prev.length === 0) return incoming;
+            const known = new Set(prev.map(m => m.id));
+            const fresh = incoming.filter(m => !known.has(m.id));
+            return fresh.length ? [...prev, ...fresh] : prev;
+          });
         })
         .catch(() => {});
     }, 3000);
     return () => clearInterval(interval);
-  }, [activeContactId, messages]);
+  }, [activeContactId]);
 
   // Clear active contact when switching tabs to avoid stale state
   useEffect(() => {
@@ -897,6 +972,8 @@ export default function InboxView() {
   }
 
   async function sendMessage() {
+    // #35: com anexo em preview, o botão/Enter enviam a mídia (o texto vira legenda)
+    if (attachPreview) { await sendMedia(); return; }
     if (!newMsg.trim() || !activeContact?.phone) return;
     setSending(true);
     try {
@@ -914,8 +991,11 @@ export default function InboxView() {
       const r = await fetch(`/api/messages?contact_id=${activeContactId}`);
       const d = await r.json();
       setMessages(d.messages || []);
+      setHasMoreMsgs(!!d.has_more);
     } catch {}
     setSending(false);
+    // #31: sem o refocus, cada envio exigia novo clique na área de texto
+    requestAnimationFrame(() => inputRef.current?.focus());
   }
 
   // On mobile, hide list when a contact is selected (show chat full-width)
@@ -1133,7 +1213,14 @@ export default function InboxView() {
             )}
           </div>
 
-          <div className="glass-panel anim" style={{ ['--i' as any]: 2, flex: 1, borderRadius: 'var(--radius-lg)', overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div ref={msgListRef} className="glass-panel anim" style={{ ['--i' as any]: 2, flex: 1, borderRadius: 'var(--radius-lg)', overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* #30: a conversa abre na janela mais recente — botão puxa as anteriores */}
+            {!loadingMsgs && hasMoreMsgs && (
+              <button onClick={loadOlderMessages} disabled={loadingOlder}
+                style={{ alignSelf: 'center', padding: '6px 16px', borderRadius: 999, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, opacity: loadingOlder ? 0.6 : 1 }}>
+                {loadingOlder ? 'Carregando…' : 'Carregar mensagens anteriores'}
+              </button>
+            )}
             {loadingMsgs ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8 }}>
                 <div className="skeleton" style={{ height: 44, width: '46%', borderRadius: 14, alignSelf: 'flex-start' }} />
@@ -1216,6 +1303,13 @@ export default function InboxView() {
                     <MessageContent m={displayMsg} />
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, textAlign: 'right' }}>{formatTime(m.created_at)}</div>
                   </div>
+                  {/* #32: encaminhar mensagem para outro contato */}
+                  <button onClick={() => setForwardMsg(m)} title="Encaminhar"
+                    style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: 0.35, transition: 'opacity 0.15s var(--ease-out)', alignSelf: 'center' }}
+                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.35')}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
+                  </button>
                 </div>
               );
             })}
@@ -1261,14 +1355,21 @@ export default function InboxView() {
                       <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {attachPreview.kind === 'audio' ? 'Mensagem de voz' : attachPreview.filename}
                       </div>
-                      {attachPreview.kind !== 'audio' && (
-                        <input value={attachPreview.caption} onChange={e => setAttachPreview(p => p ? { ...p, caption: e.target.value } : p)}
-                          placeholder="Legenda (opcional)..."
-                          style={{ width: '100%', marginTop: 6, padding: '6px 10px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)', fontSize: 12, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                      {/* #38: fila multi-arquivo · #35: legenda foi para o composer (campo único) */}
+                      {attachQueue.length > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                          + {attachQueue.length} outro{attachQueue.length > 1 ? 's' : ''} arquivo{attachQueue.length > 1 ? 's' : ''}
+                        </div>
                       )}
+                      {attachPreview.kind !== 'audio' && (
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 3 }}>
+                          O texto digitado abaixo vai como legenda.
+                        </div>
+                      )}
+                      {mediaProgress && <div style={{ fontSize: 11, color: 'var(--accent-light)', marginTop: 4 }}>{mediaProgress}</div>}
                       {mediaError && <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{mediaError}</div>}
                     </div>
-                    <button onClick={() => { setAttachPreview(null); setMediaError(''); }} disabled={sendingMedia}
+                    <button onClick={() => { setAttachPreview(null); setAttachQueue([]); setMediaError(''); }} disabled={sendingMedia}
                       style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>
                       Cancelar
                     </button>
@@ -1295,11 +1396,23 @@ export default function InboxView() {
                       {label}
                     </div>
                   ))}
+                  {/* #5: câmera — no celular abre a câmera direto (atributo capture) */}
+                  <div
+                    onClick={() => { setAttachMenuOpen(false); cameraInputRef.current?.click(); }}
+                    style={{ padding: '9px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, transition: 'background 0.15s var(--ease-out)' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    Câmera
+                  </div>
                 </div>
               )}
-              <input ref={fileInputRef} type="file" style={{ display: 'none' }}
+              {/* #38: multiple — até 10 arquivos por vez, enviados em sequência */}
+              <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }}
                 accept={undefined}
                 onChange={e => { onFilesPicked(e.target.files); e.target.value = ''; }} />
+              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                onChange={e => { fileInputKind.current = 'media'; onFilesPicked(e.target.files); e.target.value = ''; }} />
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
                 {/* S3.1: clipe de anexo */}
                 <button onClick={() => setAttachMenuOpen(v => !v)} disabled={sending || recording} title="Anexar"
@@ -1337,20 +1450,20 @@ export default function InboxView() {
                       if (f) { e.preventDefault(); fileToPreview(f); }
                     }
                   }}
-                  placeholder="Digite / para templates ou mensagem..." disabled={sending}
+                  placeholder={attachPreview ? 'Legenda (opcional)…' : 'Digite / para templates ou mensagem...'} disabled={sending}
                   style={{ flex: 1, padding: '8px 0', background: 'transparent', border: 'none', borderRadius: 0, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit', boxShadow: 'none', resize: 'none', maxHeight: 132, lineHeight: 1.5 }}
                 />
                 )}
                 {/* S3.2: microfone */}
-                {!recording && !newMsg.trim() && (
+                {!recording && !newMsg.trim() && !attachPreview && (
                   <button onClick={startRecording} disabled={sending} title="Gravar áudio"
                     style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s var(--ease-out)' }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
                   </button>
                 )}
-                <button onClick={sendMessage} disabled={sending || !newMsg.trim() || showTemplates}
-                  style={{ width: 38, height: 38, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: (sending || !newMsg.trim() || showTemplates) ? 0.45 : 1, transition: 'opacity 0.18s var(--ease-out), box-shadow 0.2s var(--ease-out), transform 0.22s var(--ease-spring)', boxShadow: (!sending && newMsg.trim()) ? '0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)' : 'inset 0 1px 0 rgba(255,255,255,0.2)' }}
-                  onMouseEnter={e => { if (newMsg.trim()) e.currentTarget.style.transform = 'scale(1.08)'; }}
+                <button onClick={sendMessage} disabled={sending || sendingMedia || (!newMsg.trim() && !attachPreview) || showTemplates}
+                  style={{ width: 38, height: 38, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: (sending || sendingMedia || (!newMsg.trim() && !attachPreview) || showTemplates) ? 0.45 : 1, transition: 'opacity 0.18s var(--ease-out), box-shadow 0.2s var(--ease-out), transform 0.22s var(--ease-spring)', boxShadow: (!sending && (newMsg.trim() || attachPreview)) ? '0 4px 14px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.28)' : 'inset 0 1px 0 rgba(255,255,255,0.2)' }}
+                  onMouseEnter={e => { if (newMsg.trim() || attachPreview) e.currentTarget.style.transform = 'scale(1.08)'; }}
                   onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
                 >
                   <svg style={{ width: 16, height: 16, stroke: '#fff', fill: 'none', strokeWidth: 2 }} viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
@@ -1501,6 +1614,90 @@ export default function InboxView() {
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{messages.length} mensagem{messages.length !== 1 ? 's' : ''} no historico</div>
         </div>
       )}
+
+      {/* #32: modal de encaminhamento — portal por causa do containing block do backdrop-filter */}
+      {forwardMsg && createPortal(
+        <ForwardModal message={forwardMsg} onClose={() => setForwardMsg(null)} />,
+        document.body
+      )}
+    </div>
+  );
+}
+
+// #32: escolhe o contato de destino e reenvia a mensagem (texto ou mídia do Storage)
+function ForwardModal({ message, onClose }: { message: Message; onClose: () => void }) {
+  const [search, setSearch] = useState('');
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sendingTo, setSendingTo] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const q = search.trim() ? `&search=${encodeURIComponent(search.trim())}` : '';
+      fetch(`/api/contacts?limit=20&exclude_source=whatsapp_group${q}`)
+        .then(r => r.json())
+        .then(d => { setContacts((d.contacts || []).filter((c: Contact) => c.id !== message.contact_id && c.phone)); setLoading(false); })
+        .catch(() => setLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search, message.contact_id]);
+
+  async function forwardTo(c: Contact) {
+    if (sendingTo) return;
+    setSendingTo(c.id);
+    setError('');
+    try {
+      const r = await fetch('/api/messages/forward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: message.id, target_contact_id: c.id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setError(d.error || 'Falha ao encaminhar.'); setSendingTo(null); return; }
+      setDone(true);
+      setTimeout(onClose, 900);
+    } catch {
+      setError('Erro de rede ao encaminhar.');
+      setSendingTo(null);
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div className="glass-modal modal-pop" onClick={e => e.stopPropagation()}
+        style={{ width: 'min(400px, 94vw)', maxHeight: '70vh', borderRadius: 18, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700 }}>Encaminhar para…</div>
+          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14 }}>×</button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '7px 10px', borderRadius: 9, background: 'var(--field-bg)', border: '1px solid var(--hairline)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {message.content_type === 'text' ? (message.body || '') : `[${message.content_type}] ${message.body || ''}`}
+        </div>
+        <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar contato…"
+          style={{ padding: '9px 12px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 10, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit' }} />
+        {done && <div style={{ fontSize: 12.5, color: 'var(--green)', fontWeight: 600, textAlign: 'center' }}>Mensagem encaminhada ✓</div>}
+        {error && <div style={{ fontSize: 12, color: '#f87171', textAlign: 'center' }}>{error}</div>}
+        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 120 }}>
+          {loading && <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 16 }}>Carregando…</div>}
+          {!loading && contacts.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 16 }}>Nenhum contato encontrado.</div>}
+          {contacts.map(c => (
+            <button key={c.id} onClick={() => forwardTo(c)} disabled={!!sendingTo}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', opacity: sendingTo && sendingTo !== c.id ? 0.5 : 1, transition: 'background 0.15s var(--ease-out)' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+              <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--field-bg)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', flexShrink: 0 }}>
+                {c.photo_url ? <img src={c.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (c.name || '?').charAt(0).toUpperCase()}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{sendingTo === c.id ? 'Enviando…' : c.phone}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

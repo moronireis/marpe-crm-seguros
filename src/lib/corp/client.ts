@@ -11,22 +11,28 @@ let _tokenExpiry: number = 0;
 async function getToken(): Promise<string> {
   if (_token && Date.now() < _tokenExpiry) return _token;
 
-  const res = await fetch(`${CORP_URL}/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: CORP_EMAIL, senha: CORP_PASSWORD, aplicacao: 0 }),
-  });
+  // S0 (22/07): o /login da Corp oscila (500 intermitente desde 21/07) — 3 tentativas
+  // com backoff antes de desistir, para o sync não morrer numa falha passageira.
+  let lastErr = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const res = await fetch(`${CORP_URL}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: CORP_EMAIL, senha: CORP_PASSWORD, aplicacao: 0 }),
+    }).catch((e: any) => ({ ok: false, status: 0, json: async () => ({ message: String(e?.message || e) }) } as Response));
 
-  if (!res.ok) {
+    if (res.ok) {
+      const data = await res.json() as CorpLoginResponse;
+      _token = data.token;
+      // Token expires in 3 days per API, refresh after 2 days
+      _tokenExpiry = Date.now() + 2 * 24 * 60 * 60 * 1000;
+      return _token;
+    }
     const err = await res.json().catch(() => ({}));
-    throw new Error(`Corp login failed: ${(err as any).message || res.status}`);
+    lastErr = String((err as any).message || res.status);
+    if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 2000));
   }
-
-  const data = await res.json() as CorpLoginResponse;
-  _token = data.token;
-  // Token expires in 3 days per API, refresh after 2 days
-  _tokenExpiry = Date.now() + 2 * 24 * 60 * 60 * 1000;
-  return _token;
+  throw new Error(`Corp login failed: ${lastErr}`);
 }
 
 async function corpFetch<T>(path: string, params?: Record<string, string>): Promise<T> {

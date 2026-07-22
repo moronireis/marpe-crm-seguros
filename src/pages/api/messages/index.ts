@@ -21,11 +21,17 @@ export const GET: APIRoute = async ({ locals, url }) => {
   const sentBy = url.searchParams.get('sent_by');
   const search = url.searchParams.get('search');
   const limit = parseInt(url.searchParams.get('limit') || '200');
+  // Issue #30: cursor para "Carregar anteriores" — retorna a janela anterior a este timestamp
+  const before = url.searchParams.get('before');
 
   const sb = createServerClient();
-  let query = sb.from('marpe_messages').select('*').order('created_at', { ascending: true }).limit(limit);
+  // Issue #30: a janela é sempre a MAIS RECENTE (desc + reverse). O order ascendente
+  // antigo devolvia as 200 primeiras mensagens da conversa — threads longas nunca
+  // mostravam as mensagens novas.
+  let query = sb.from('marpe_messages').select('*').order('created_at', { ascending: false }).limit(limit);
   if (dealId) query = query.eq('deal_id', dealId);
   else if (contactId) query = query.eq('contact_id', contactId);
+  if (before) query = query.lt('created_at', before);
 
   // Date range filters
   if (dateFrom) query = query.gte('created_at', dateFrom);
@@ -40,7 +46,10 @@ export const GET: APIRoute = async ({ locals, url }) => {
   const { data, error } = await query;
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  return new Response(JSON.stringify({ messages: data }), { status: 200 });
+  // Devolve em ordem cronológica (a UI renderiza de cima para baixo);
+  // has_more sinaliza que existem mensagens anteriores à janela.
+  const messages = (data || []).slice().reverse();
+  return new Response(JSON.stringify({ messages, has_more: (data || []).length >= limit }), { status: 200 });
 };
 
 // POST /api/messages — send a message via UaZapi

@@ -126,6 +126,9 @@ export default function TemplatesView() {
   const [showVars, setShowVars] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const varsPopupRef = useRef<HTMLDivElement>(null);
+  // #37: o erro "Nome é obrigatório" aparecia longe do campo (que fica no topo,
+  // fora de vista após colar um template longo) — foca e rola até ele
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -214,7 +217,12 @@ export default function TemplatesView() {
   // ── Save ────────────────────────────────────────────────────────────────────
 
   async function save() {
-    if (!form.name.trim()) { setError('Nome é obrigatório'); return; }
+    if (!form.name.trim()) {
+      setError('Nome é obrigatório — preencha o campo no topo');
+      nameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      nameInputRef.current?.focus();
+      return;
+    }
     if (!form.body.trim()) { setError('Mensagem é obrigatória'); return; }
     setSaving(true);
     setError('');
@@ -608,7 +616,14 @@ export default function TemplatesView() {
                 placeholder="Nome do template..."
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                ref={nameInputRef}
               />
+              {/* #37: marca visível quando a validação do nome barrar o salvamento */}
+              {error.startsWith('Nome é obrigatório') && !form.name.trim() && (
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#f87171', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 4, padding: '2px 8px', flexShrink: 0 }}>
+                  obrigatório
+                </span>
+              )}
               {isNew && (
                 <span style={{
                   fontSize: 10,

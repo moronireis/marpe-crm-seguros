@@ -88,7 +88,11 @@ export const POST: APIRoute = async ({ request }) => {
 
   // pushName / notify = the contact's WhatsApp display name (what the contact set for themselves)
   const pushName: string = msg.pushName || msg.notify || body.pushName || body.notify || '';
-  const senderName = chat.name || pushName || msg.senderName || phone;
+  // Issue #29: em eventos fromMe o pushName é o nome do REMETENTE — o dono da instância
+  // ("Marcel - Marpe Seguros"), nunca o contato. Usá-lo aqui fazia todo número que o
+  // Marcel chamava primeiro ser criado com o nome dele. Em fromMe, só o nome do chat
+  // (= o contato) ou o telefone são confiáveis.
+  const senderName = fromMe ? (chat.name || phone) : (chat.name || pushName || msg.senderName || phone);
 
   // Profile picture URL — UazapiGO may send in chat or message level
   const profilePicUrl: string | null =
@@ -254,8 +258,10 @@ export const POST: APIRoute = async ({ request }) => {
       contactId = existing.id;
       const updates: Record<string, any> = {};
 
-      // Update name if we have a better one (not a raw phone / JID)
-      const betterName = pushName || chat.name || '';
+      // Update name if we have a better one (not a raw phone / JID).
+      // Issue #29: em fromMe o pushName é o nome do dono da instância — não pode
+      // "melhorar" o nome do contato com ele.
+      const betterName = fromMe ? (chat.name || '') : (pushName || chat.name || '');
       const nameIsPhoneOrEmpty = !betterName || /^[\d\s()+\-]+$/.test(betterName) || betterName.includes('@');
       if (!nameIsPhoneOrEmpty) {
         const { data: currentContact } = await sb

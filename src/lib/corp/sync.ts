@@ -216,10 +216,26 @@ function negocioListFields(neg: CorpNegocio): Record<string, any> {
   };
 }
 
+// #36 (defensivo): a doc oficial não tipa produtor/agente no GET /negocio, mas a
+// tela do Corp tem a grade "Produtores". Quando a resposta trouxer os dados (array
+// produtores[] ou campos avulsos), popula as colunas — sem sobrescrever com null
+// quando o campo não vier (objeto vazio = update não toca as colunas).
+function extractProdutorAgente(det: any): { produtor?: string; agente?: string } {
+  const out: { produtor?: string; agente?: string } = {};
+  const arr = Array.isArray(det?.produtores) ? det.produtores : [];
+  const first = arr[0] || {};
+  const prod = det?.produtor ?? det?.nome_produtor ?? first.produtor ?? first.nome_produtor ?? first.nome ?? null;
+  const age = det?.agente ?? det?.nome_agente ?? first.agente ?? first.nome_agente ?? null;
+  if (typeof prod === 'string' && prod.trim()) out.produtor = prod.trim();
+  if (typeof age === 'string' && age.trim()) out.agente = age.trim();
+  return out;
+}
+
 // Maps Corp negocio DETAIL fields → marpe_deals columns (Fase 2 fields).
 // Exportada para o refresh por negócio do DealPanel (/api/corp/refresh-deal).
 export function negocioDetailFields(det: CorpNegocioDetail): Record<string, any> {
   return {
+    ...extractProdutorAgente(det),
     comissao_pct: det.per_c || null,
     campanha: det.campanha || null,
     seguradora: det.seguradora || null,
@@ -248,6 +264,8 @@ export function negocioDetailFields(det: CorpNegocioDetail): Record<string, any>
       codusu_responsavel: det.codusu_responsavel,
       motivo_perda: det.motivo_perda,
       atendimentos: det.atendimentos || [],
+      // #36: grade Produtores crua, se a API devolver (mapeamento futuro codpro→nome)
+      ...((det as any).produtores ? { produtores: (det as any).produtores } : {}),
     },
   };
 }

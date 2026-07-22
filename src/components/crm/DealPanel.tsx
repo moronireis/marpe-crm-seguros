@@ -367,6 +367,7 @@ export default function DealPanel({ dealId, stages, onClose, onUpdated, initialT
           <DealTabAtividades
             activities={deal.marpe_deal_activities || []}
             users={usersMap}
+            corpAtendimentos={(deal as any).detalhes_corp?.atendimentos || []}
           />
         )}
 

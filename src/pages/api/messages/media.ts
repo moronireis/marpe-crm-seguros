@@ -55,12 +55,16 @@ export const POST: APIRoute = async ({ locals, request }) => {
   if (!uazType) {
     return new Response(JSON.stringify({ error: `kind inválido: ${kind}` }), { status: 400 });
   }
-  const m = String(data).match(/^data:([^;]+);base64,(.+)$/s);
-  if (!m) {
+  // Issue #33: o MIME do MediaRecorder vem com parâmetros ("audio/webm;codecs=opus"),
+  // que o regex antigo /^data:([^;]+);base64,/ rejeitava. Localiza o marcador ";base64,"
+  // e normaliza o MIME para o tipo puro; a UazapiGO recebe o data-URI reconstruído limpo.
+  const raw = String(data);
+  const marker = raw.indexOf(';base64,');
+  if (!raw.startsWith('data:') || marker === -1 || marker + 8 >= raw.length) {
     return new Response(JSON.stringify({ error: 'data deve ser um data-URI base64' }), { status: 400 });
   }
-  const mime = m[1];
-  const b64 = m[2];
+  const mime = raw.slice(5, marker).split(';')[0].trim() || 'application/octet-stream';
+  const b64 = raw.slice(marker + 8);
   const bytes = Buffer.from(b64, 'base64');
   if (bytes.length > 45 * 1024 * 1024) {
     return new Response(JSON.stringify({ error: 'Arquivo acima de 45 MB — envie um arquivo menor' }), { status: 400 });
@@ -77,7 +81,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     body: JSON.stringify({
       number: phoneForSend,
       type: uazType,
-      file: data,
+      file: `data:${mime};base64,${b64}`,
       ...(caption ? { text: caption } : {}),
       ...(kind === 'document' && filename ? { docName: filename } : {}),
     }),

@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
-import { syncAll } from '../../../lib/corp/sync';
+import { syncAll, logCorpSync } from '../../../lib/corp/sync';
+import { createServerClient } from '../../../lib/supabase-server';
 
 export const prerender = false;
 
@@ -42,6 +43,15 @@ export const GET: APIRoute = async ({ request }) => {
       summary: { created: totalCreated, updated: totalUpdated, errors: totalErrors },
     }), { status: 200 });
   } catch (e: any) {
+    // S0 (22/07): falha do cron noturno também vai para o corp_sync_log —
+    // sem isso a quebra do login Corp em 21/07 não deixou rastro nenhum
+    try {
+      await logCorpSync(createServerClient(), {
+        sync_type: 'negocios',
+        status: 'error',
+        message: String(e?.message || e).slice(0, 500),
+      });
+    } catch { /* log é best-effort */ }
     return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500 });
   }
 };

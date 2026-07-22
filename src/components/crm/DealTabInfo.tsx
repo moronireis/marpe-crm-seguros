@@ -13,6 +13,7 @@ interface Deal {
   base_calculo_repasse: number | null; pct_repasse: number | null; valor_repasse: number | null;
   agente: string | null; observacoes_proposta: string | null; produtor: string | null;
   responsible_id: string | null;
+  detalhes_corp?: Record<string, any> | null;
   marpe_profiles: { id: string; full_name: string } | null;
   marpe_contacts: { id: string; name: string; phone: string | null; email: string | null; city: string | null } | null;
 }
@@ -29,9 +30,28 @@ interface InfoLookups {
   seguradoras: { codigo: number; nome: string }[];
   produtores: { codigo: number; nome: string }[];
   agentes: { codigo: number; nome: string }[];
+  ramos?: { codigo: number; nome: string; abreviatura?: string }[];
   campanhas: string[];
   campanhas_cod?: number[];
   bases_repasse?: number[];
+}
+
+// #36: o sync guarda o ramo como abreviação da lista do Corp ("empr") — resolve o
+// nome completo ("EMPRESARIAL") via codram (detalhes_corp) ou pela abreviatura.
+function resolveRamoNome(deal: Deal, lookups: InfoLookups | null): string {
+  const ramos = lookups?.ramos || [];
+  const codram = deal.detalhes_corp?.codram;
+  if (codram) {
+    const byCod = ramos.find(r => r.codigo === Number(codram));
+    if (byCod) return byCod.nome;
+  }
+  if (deal.ramo) {
+    const ab = deal.ramo.toLowerCase();
+    const byAb = ramos.find(r => (r.abreviatura || '').toLowerCase() === ab || r.nome.toLowerCase() === ab);
+    if (byAb) return byAb.nome;
+    return deal.ramo.toUpperCase();
+  }
+  return '—';
 }
 
 function fmt(v: number | null | undefined) {
@@ -190,7 +210,7 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
             <button onClick={() => setEditing(true)} style={{ fontSize: 10, color: 'var(--accent-light)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textTransform: 'none', fontWeight: 500 }}>Editar</button>
           </div>
           <div style={s.row}><span style={s.label}>Tipo</span><span style={s.value}>{DEAL_TYPES[deal.deal_type || ''] || '—'}</span></div>
-          <div style={s.row}><span style={s.label}>Ramo</span><span style={s.value}>{deal.ramo || '—'}</span></div>
+          <div style={s.row}><span style={s.label}>Ramo</span><span style={s.value}>{resolveRamoNome(deal, lookups)}</span></div>
           <div style={s.row}><span style={s.label}>Seguradora</span><span style={s.value}>{deal.seguradora || '—'}</span></div>
           {/* Apólice: campo removido dos formulários (issue #11); exibe apenas
               quando veio preenchida do sync de apólices do Corp */}
@@ -227,6 +247,14 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
           <div style={s.sectionTitle}>Produtores</div>
           <div style={s.row}><span style={s.label}>Produtor</span><span style={s.value}>{deal.produtor || '—'}</span></div>
           <div style={s.row}><span style={s.label}>Agente</span><span style={s.value}>{deal.agente || '—'}</span></div>
+          {/* #36: auditoria do Corp — quem digitou e o código do responsável (nome
+              depende de endpoint de usuários solicitado à Agia) */}
+          {deal.detalhes_corp?.criado_por && (
+            <div style={s.row}><span style={s.label}>Criado no Corp por</span><span style={s.value}>{deal.detalhes_corp.criado_por}</span></div>
+          )}
+          {deal.detalhes_corp?.codusu_responsavel != null && (
+            <div style={s.row}><span style={s.label}>Responsável (Corp)</span><span style={s.value}>Usuário #{deal.detalhes_corp.codusu_responsavel}</span></div>
+          )}
         </div>
 
         {/* Próxima Ação */}
@@ -270,16 +298,28 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
           </div>
           <div>
             <label style={s.label}>Ramo</label>
+            {/* #36: ramos vivos do Corp quando os lookups respondem (valor continua a
+                abreviação minúscula — formato que o sync grava); fallback estático */}
             <select value={form.ramo} onChange={field('ramo')} style={s.select}>
               <option value="">— Selecione —</option>
-              <option value="auto">Auto</option>
-              <option value="vida">Vida</option>
-              <option value="residencial">Residencial</option>
-              <option value="empresarial">Empresarial</option>
-              <option value="equipamento">Equipamento</option>
-              <option value="consorcio">Consórcio</option>
-              <option value="financiamento">Financiamento</option>
-              <option value="rcge">RCGE</option>
+              {lookups?.ramos?.length ? (
+                lookups.ramos.map(r => {
+                  const val = (r.abreviatura || r.nome).toLowerCase();
+                  return <option key={r.codigo} value={val}>{r.nome}</option>;
+                })
+              ) : (<>
+                <option value="auto">Auto</option>
+                <option value="vida">Vida</option>
+                <option value="residencial">Residencial</option>
+                <option value="empresarial">Empresarial</option>
+                <option value="equipamento">Equipamento</option>
+                <option value="consorcio">Consórcio</option>
+                <option value="financiamento">Financiamento</option>
+                <option value="rcge">RCGE</option>
+              </>)}
+              {form.ramo && lookups?.ramos?.length && !lookups.ramos.some(r => (r.abreviatura || r.nome).toLowerCase() === form.ramo) && (
+                <option value={form.ramo}>{form.ramo.toUpperCase()}</option>
+              )}
             </select>
           </div>
         </div>
