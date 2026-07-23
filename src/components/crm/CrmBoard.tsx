@@ -1027,9 +1027,26 @@ function ExportFunnelButton({ funnelId }: { funnelId: string }) {
   );
 }
 
+// Polish 23/07: canonicaliza seguradora — o sync de documentos grava a ABREVIAÇÃO
+// ("ALLI") e o detail de negócios grava o NOME ("ALLIANZ SEGUROS"), o que duplicava
+// o filtro. Resolve pela tabela de seguradoras do Corp (abreviatura → nome).
+function buildSeguradoraCanon(lookups: CorpFilterLookups | null): (v: string) => string {
+  const map = new Map<string, string>();
+  for (const s of lookups?.seguradoras || []) {
+    if (s.abreviatura) map.set(s.abreviatura.trim().toUpperCase(), s.nome);
+    map.set(s.nome.trim().toUpperCase(), s.nome);
+  }
+  return (v: string) => map.get((v || '').trim().toUpperCase()) || v;
+}
+
+interface CorpFilterLookups {
+  ramos?: { codigo: number; nome: string; abreviatura?: string }[];
+  seguradoras?: { codigo: number; nome: string; abreviatura?: string }[];
+}
+
 // ─── FilterBar ────────────────────────────────────────────────────────────────
 function FilterBar({
-  filters, onChange, onClear, users, deals, stages,
+  filters, onChange, onClear, users, deals, stages, corpLookups,
 }: {
   filters: FilterState;
   onChange: (f: Partial<FilterState>) => void;
@@ -1037,12 +1054,15 @@ function FilterBar({
   users: UserOption[];
   deals: Deal[];
   stages: Stage[];
+  corpLookups: CorpFilterLookups | null;
 }) {
-  // Extract unique options from deals
+  // Extract unique options from deals — seguradoras canônicas (sem duplicata
+  // abreviação × nome completo)
+  const canonSeg = useMemo(() => buildSeguradoraCanon(corpLookups), [corpLookups]);
   const seguradoras = useMemo(() =>
-    [...new Set(deals.map(d => d.seguradora).filter(Boolean) as string[])].sort()
+    [...new Set(deals.map(d => canonSeg(d.seguradora || '')).filter(Boolean) as string[])].sort()
       .map(s => ({ value: s, label: s })),
-    [deals]);
+    [deals, canonSeg]);
 
   const produtores = useMemo(() =>
     [...new Set(deals.map(d => d.produtor).filter(Boolean) as string[])].sort()
@@ -1062,16 +1082,19 @@ function FilterBar({
     stages.map(s => ({ value: s.id, label: s.name })),
     [stages]);
 
-  const ramoOptions = [
-    { value: 'auto', label: 'Auto' },
-    { value: 'vida', label: 'Vida' },
-    { value: 'residencial', label: 'Residencial' },
-    { value: 'empresarial', label: 'Empresarial' },
-    { value: 'equipamento', label: 'Equipamento' },
-    { value: 'consorcio', label: 'Consórcio' },
-    { value: 'financiamento', label: 'Financiamento' },
-    { value: 'rcge', label: 'RCGE' },
-  ];
+  // Polish 23/07: opções vêm dos valores REAIS dos negócios (27 ramos no banco —
+  // a lista fixa de 8 usava valores que nem batiam com o formato do sync, ex.
+  // "empresarial" vs "empr") com rótulo resolvido pela tabela de ramos do Corp.
+  const ramoOptions = useMemo(() => {
+    const label = (v: string) => {
+      const hit = (corpLookups?.ramos || []).find(r =>
+        (r.abreviatura || '').toLowerCase() === v || r.nome.toLowerCase() === v);
+      return hit ? hit.nome : v.toUpperCase();
+    };
+    return [...new Set(deals.map(d => (d.ramo || '').toLowerCase()).filter(Boolean))]
+      .map(v => ({ value: v, label: label(v) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [deals, corpLookups]);
 
   const tipoOptions = [
     { value: 'prospeccao', label: 'Prospecção' },
@@ -1391,6 +1414,17 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
     });
   }, []);
 
+  // Polish 23/07: lookups do Corp para rótulos dos filtros (ramos por extenso +
+  // seguradoras canônicas). Cache server-side de 10 min + stale-while-revalidate.
+  const [corpLookups, setCorpLookups] = useState<CorpFilterLookups | null>(null);
+  useEffect(() => {
+    fetch('/api/corp/lookups')
+      .then(r => r.json())
+      .then(d => setCorpLookups({ ramos: d.ramos || [], seguradoras: d.seguradoras || [] }))
+      .catch(() => {});
+  }, []);
+  const canonSegBoard = useMemo(() => buildSeguradoraCanon(corpLookups), [corpLookups]);
+
   // S0 (22/07): idade do último sync Corp — a quebra do login em 21/07 passou
   // 2 dias invisível; agora o board avisa quando o dado está velho
   const [syncStatus, setSyncStatus] = useState<{ hours: number | null; error: string | null } | null>(null);
@@ -1544,7 +1578,7 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
       if (filters.responsavel.length > 0 && !filters.responsavel.includes(d.responsible_id || '')) return false;
       if (filters.etapa.length > 0 && !filters.etapa.includes(d.stage_id)) return false;
       if (filters.ramo.length > 0 && !filters.ramo.includes((d.ramo || '').toLowerCase())) return false;
-      if (filters.seguradora.length > 0 && !filters.seguradora.includes(d.seguradora || '')) return false;
+      if (filters.seguradora.length > 0 && !filters.seguradora.includes(canonSegBoard(d.seguradora || ''))) return false;
       if (filters.produtor.length > 0 && !filters.produtor.includes(d.produtor || '')) return false;
       if (filters.tipo.length > 0 && !filters.tipo.includes(d.deal_type || '')) return false;
       if (filters.status.length > 0 && !filters.status.includes(d.status_custom || '')) return false;
@@ -1596,7 +1630,7 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
 
       return true;
     });
-  }, [deals, searchDebounced, filters, showOld, isRecent]);
+  }, [deals, searchDebounced, filters, showOld, isRecent, canonSegBoard]);
 
   // Quantos negócios antigos existem no funil (para o chip da janela de recência)
   const oldCount = useMemo(() => deals.reduce((n, d) => n + (isRecent(d) ? 0 : 1), 0), [deals, isRecent]);
@@ -1910,6 +1944,7 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
             users={users}
             deals={deals}
             stages={stages}
+            corpLookups={corpLookups}
           />
         )}
 

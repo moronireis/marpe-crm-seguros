@@ -13,10 +13,12 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # 7 min de teto no job; o curl desiste aos 5,5 min (maxDuration da function é
+    # 300s) — evita o run zumbi de 15 min visto em 22/07 quando o login pendurou.
+    timeout-minutes: 7
     steps:
       - name: Sincroniza negócios (detalhe + reconciliação)
         run: |
-          curl -sS -f -m 300 \
+          curl -sS -f -m 330 --connect-timeout 20 \
             -H "x-webhook-key: ${{ secrets.MARPE_WEBHOOK_KEY }}" \
             "https://marpe-crm-seguros.vercel.app/api/internal/corp-sync-negocios"

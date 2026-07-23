@@ -1,17 +1,20 @@
-# Relatório — Board 22/07 executado (deploy d5f7839)
+# Relatório — Board 22/07 executado (deploys d5f7839 → c981139+)
 
-> Data: 22/07/2026 · Deploy prod: https://marpe-crm-seguros.vercel.app (READY)
+> Data: 22/07/2026, atualizado 23/07 · Prod: https://marpe-crm-seguros.vercel.app (READY)
 > Análise completa: PLANO-BOARD-2207.md · E2E automatizado: 7/7 PASS em produção
 
 ---
 
-## 🚨 AÇÃO EXTERNA PENDENTE — Agia (bloqueador do sync)
+## ✅ ATUALIZAÇÃO 23/07 — Corp RESTABELECIDO + 2 correções extras
 
-O `POST /login` da CorpAPI retorna **500 desde ~21/07** (5/5 tentativas, credenciais de produção). Nenhum sync roda desde 20/07 23h. **Tokens antigos expiram ~23-24/07 — depois disso o Corp some do CRM até a Agia corrigir.**
+- **Login da CorpAPI voltou 22/07 ~21h17 (BRT)**. O monitor detectou e disparou o sync na hora: 2 negócios criados, 126 atualizados, 1 removido (excluído no Corp), 3 sinistros, 0 erros. Login estável (~1s). Validação campo a campo: **CRM = API em 128/128 negócios em andamento**. Banner de alerta do board limpou sozinho. Issues **#34 e #15 fechadas** com evidência.
+- **Anexos do Corp no card (#36) corrigidos**: a API devolve anexos de negociação numa chave diferente da de cliente (`negocio_anexos`) e o CRM não lia — negócio 7512 agora lista os 2 PDFs com download OK (commit c981139).
+- **Filtros do CRM (polish 23/07)**: Ramo agora lista os **27 ramos reais** dos negócios com nome por extenso (a lista fixa antiga tinha 8 opções com valores que nem batiam — ex. "empresarial" vs "empr"); Seguradora sem duplicatas (abreviação e nome completo unificados — "ALLI" = "ALLIANZ SEGUROS").
+- **⚠️ Divergência REMANESCENTE (lado Agia, #28 itens 4-7)**: a "Próxima Ação" que a API entrega é a **data de registro** do atendimento, não o agendamento da tela do Corp (ex.: 7512 tela=22/07 vs API=09/07); descrição vem sempre null; grade Produtores e usuários não são expostos; `header.count` inconsistente. **O CRM está fiel à API — enquanto a Agia não responder, o filtro "Próxima ação" pode diferir do Totalizador do Corp.** Pedidos formalizados em SOLICITACAO-AGIA-API.md (itens 4-7) e na issue #28.
 
-- Evidência técnica postada na issue #28 para o Tiago/Marcel repassarem ao Leonardo (leonardowolff@agger.com.br).
-- Perguntar: houve troca de credenciais/módulo Corp+ em ~21/07? Se sim, enviar novas (login, senha, cód. filial).
-- Quando o login voltar, o sync se normaliza sozinho em até 30 min (cron diurno). Nada a fazer no CRM.
+## ~~🚨 AÇÃO EXTERNA PENDENTE — Agia (bloqueador do sync)~~ → RESOLVIDO 23/07 (registro histórico)
+
+O `POST /login` da CorpAPI retornou **500 de ~21/07 até 22/07 21h17 BRT** (falha na emissão de token para qualquer login válido; a validação de credenciais funcionava). Diagnóstico e evidências na issue #28. O sync se normalizou automaticamente na volta, como previsto.
 
 ## Blindagem implantada (S0) — a falha nunca mais fica invisível
 
@@ -43,14 +46,14 @@ O `POST /login` da CorpAPI retorna **500 desde ~21/07** (5/5 tentativas, credenc
 
 Em prod: Ramo por extenso (EMPRESARIAL, não "empr") via lookups; atendimentos do Corp na aba Atividades (U6 — dados já estavam no banco, faltava exibir); "Criado no Corp por" + "Responsável (Corp)" na Info; sync preparado para produtor/agente (a doc da CorpAPI não tipa esses campos — capturamos se vierem). Pendente da Agia: endpoint de usuários (nome do responsável) e login voltar (próxima ação + anexos).
 
-## Abertas no board (6)
+## Abertas no board (4 — atualizado 23/07)
 
-- **#28** — e-mail Agia (evidência do login 500 postada) — **é o item mais urgente**
-- **#34** — funil vs Corp (diagnóstico postado; normaliza com o login)
-- **#36** — dados Corp (parcial acima)
-- **#15** — negócio mesmo-dia (código pronto; validação depende do login)
+- **#28** — respostas da Agia aos itens 4-7 (próxima ação real, descrição, produtores, usuários, count)
+- **#36** — dados Corp: anexos ✓ e ramo ✓ resolvidos; produtor/responsável e próxima ação dependem da Agia
 - **#4** — waSpeed: aguarda OK para P-A (msg agendada), P-B (lembretes), P-C (transferir)
 - **#5** — menu "+": aguarda decisão sobre Contato/Enquete/Evento/Figurinha/Catálogo
+
+Fechadas em 23/07: **#34** (sync normalizado, CRM=API 128/128) e **#15** (mecanismo mesmo-dia validado na retomada — skipped:0).
 
 ## Roteiro de testes (Marcel/Tati)
 
@@ -61,9 +64,9 @@ Em prod: Ramo por extenso (EMPRESARIAL, não "empr") via lookups; atendimentos d
 5. **Encaminhar**: passar o mouse numa mensagem → ↪ → escolher contato → conferir no WhatsApp.
 6. **Contatos**: buscar "Marcel -" no Inbox → só o Marcel real; os 51 contatos falsos agora têm o nome verdadeiro (ex.: Thaiana).
 7. **Template**: criar sem nome → a tela rola até o campo Nome marcado em vermelho.
-8. **CRM**: aplicar filtros → sair e voltar → filtros mantidos. Banner vermelho "Dados do Corp sem atualização" deve estar visível ATÉ a Agia corrigir o login (é o alerta novo funcionando).
-9. **Card**: aba Atividades mostra "Atendimento Corp" (ex.: negócio 7512 tem o da Vanessa 09/07); aba Info mostra Ramo por extenso e "Criado no Corp por".
-10. **Após a Agia corrigir o login**: conferir Próxima Ação = Corp (filtro "Hoje" com os mesmos números do Totalizador) e negócio criado no Corp aparecendo em ~30 min (#15, #34, #36 — aí fechamos as 3).
+8. **CRM**: aplicar filtros → sair e voltar → filtros mantidos. Filtro Ramo agora tem todos os ramos por extenso; Seguradora sem duplicatas. (O banner vermelho de sync só aparece se o Corp parar de novo.)
+9. **Card**: aba Atividades mostra "Atendimento Corp" (ex.: negócio 7512 tem o da Vanessa 09/07); aba Info mostra Ramo por extenso e "Criado no Corp por"; aba Docs lista os anexos do Corp (7512 tem 2 PDFs).
+10. **Negócio novo criado no Corp** aparece no CRM em até 30 min (validado na retomada de 22/07 à noite). ⚠️ A data de "Próxima Ação" pode diferir da tela do Corp em parte dos negócios — é limitação da API da Agia (issue #28), não do CRM.
 
 ## Detalhe técnico
 
