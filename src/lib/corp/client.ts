@@ -145,10 +145,13 @@ export async function getClienteAnexos(codigo: number): Promise<CorpAnexo[]> {
 
 export async function getNegocioAnexos(codigo: number): Promise<CorpAnexo[]> {
   try {
-    const data = await corpFetch<{ header: { count: number }; anexos: CorpAnexo[] }>('/negocio_anexos', {
+    // #36 (23/07): a resposta vem na chave "negocio_anexos" (não "anexos" como no
+    // /cliente_anexos) — o E2E de 09/07 só cobriu negócio SEM anexos (404) e o
+    // parse errado passou despercebido: a aba mostrava "parte não pôde ser carregada"
+    const data = await corpFetch<{ header: { count: number }; negocio_anexos?: CorpAnexo[]; anexos?: CorpAnexo[] }>('/negocio_anexos', {
       codfil: String(CODFIL), codigo: String(codigo),
     });
-    return data.anexos || [];
+    return data.negocio_anexos || data.anexos || [];
   } catch (e) {
     if (String(e).includes('Nenhum anexo')) return [];
     throw e;

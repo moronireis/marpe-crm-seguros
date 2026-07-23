@@ -15,7 +15,7 @@ Olá, equipe Agia,
 
 Somos a equipe de tecnologia que atende a **Marca Corretora de Seguros** (Marcel Foletto, São Sepé/RS). Estamos integrando o CRM da corretora à API do Corp Nuvem (`api.corpnuvem.com`), autenticando com as credenciais do próprio cliente. Com a documentação publicada no Postman, a integração avançou muito bem — leitura completa e criação de clientes e negociações já estão operacionais.
 
-Ficaram apenas três pontos que não localizamos na documentação:
+Seguem os pontos que não localizamos na documentação ou que divergem do comportamento da interface do Corp:
 
 ## 1. Dados bancários do cliente
 
@@ -28,6 +28,27 @@ Os endpoints `GET /cliente_anexos` e `GET /negocio_anexos` funcionam perfeitamen
 ## 3. Lookups de Campanhas e Bases de Cálculo de Repasse
 
 No `GET /negocio`, a campanha vem apenas como código (`codcamp`, ex.: 16) — o campo `campanha` retorna `null` mesmo quando há campanha vinculada. O mesmo vale para a base de cálculo do repasse (`campo_base_r`, ex.: 5), que na interface do Corp aparece com rótulo. Existe endpoint de **lista de campanhas** (código + nome) e de **bases de cálculo de repasse** (código + rótulo), como já existe para `/seguradoras`, `/produtores` e `/agentes`? Alternativamente, o `GET /negocio` poderia retornar os nomes resolvidos?
+
+## 4. Próxima Ação — divergência entre API e interface (URGENTE pós-incidente de 21-22/07)
+
+Na interface do Corp, a Negociação exibe **"Data Próxima Ação"** com o agendamento futuro (ex.: negócio **7512** mostrava 22/07/2026 com a descrição "COTAÇÃO PORTO ANEXO"). Já na API, tanto `GET /negocios_andamento` quanto `GET /negocio` retornam `prox_aten_data = "09/07/2026"` para o mesmo negócio — que é a **data de registro** do atendimento (`prox_aten_codigo` 37095, registrado em 09/07 17:24), não o agendamento exibido na tela. Além disso:
+
+- `prox_aten_descricao` retorna **null em 100% dos registros** (testamos os 128 negócios em andamento), embora a tela exiba as descrições;
+- o array `atendimentos[]` do `GET /negocio` traz apenas a data de **registro** (`data`) e `realizado` — o campo de **agendamento** do atendimento não é exposto em nenhuma rota.
+
+Perguntas: (a) qual é a definição oficial de `prox_aten_data`? (b) existe forma de obter a **data agendada** da próxima ação (a mesma da tela e do filtro "Próxima Ação" da Grade)? (c) a `prox_aten_descricao` nula é um defeito? Esse campo é a base do funil de trabalho diário da corretora no CRM.
+
+## 5. Produtores/Agente da negociação
+
+A tela da Negociação tem a grade **"Produtores"** (Agente + Produtor, ex.: PADR / MARCEL), mas o `GET /negocio` não retorna nenhum campo de produtor/agente (verificamos todos os campos da resposta). Existe rota ou campos para obter os produtores vinculados a uma negociação?
+
+## 6. Usuários (código → nome)
+
+O `GET /negocio` retorna `codusu_responsavel` (ex.: 1), mas não há endpoint de usuários para resolver o nome ("Responsável pela Negociação" da tela). Existe uma rota tipo `/usuarios` (código + nome)?
+
+## 7. `header.count` inconsistente no /negocios_andamento
+
+Em 23/07 ~00h, `GET /negocios_andamento` retornou `header.count = 28` com **128 itens** na própria resposta (página única). A paginação baseada no `count` fica imprevisível — poderiam verificar?
 
 ---
 
