@@ -25,7 +25,12 @@ interface Message {
   media_url: string | null; media_mime: string | null;
   wa_message_id: string | null;
   is_from_automation: boolean; created_at: string;
-  metadata?: { sender_name?: string | null; sender_photo?: string | null; is_group?: boolean } | null;
+  metadata?: {
+    sender_name?: string | null; sender_photo?: string | null; is_group?: boolean;
+    /** S2 (27/07): emoji da reação, gravado no próprio registro (não vira mensagem) */
+    reaction?: string | null;
+    filename?: string | null;
+  } | null;
 }
 
 // Resolve the best available URL for a media message.
@@ -410,7 +415,11 @@ export default function InboxView() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const msgListRef = useRef<HTMLDivElement>(null);
   // #32: encaminhar mensagem para outro contato
-  const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+  // S2 (27/07): encaminhar N mensagens × N contatos + reações
+  const [forwardMsgs, setForwardMsgs] = useState<Message[] | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedMsgs, setSelectedMsgs] = useState<Record<string, Message>>({});
+  const [reactFor, setReactFor] = useState<string | null>(null);
   // #5: câmera no menu de anexos (mobile abre a câmera via capture)
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -813,6 +822,41 @@ export default function InboxView() {
     requestAnimationFrame(resizeComposer);
   }
 
+  // S2 #14: seleção múltipla de mensagens
+  function toggleMsgSelection(m: Message) {
+    setSelectedMsgs(prev => {
+      const next = { ...prev };
+      if (next[m.id]) delete next[m.id]; else next[m.id] = m;
+      return next;
+    });
+  }
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedMsgs({});
+  }
+
+  // S2: reagir a uma mensagem. Otimista — pinta na hora e desfaz se a Uazapi recusar,
+  // senão a reação demora o round-trip inteiro para aparecer.
+  async function react(m: Message, emoji: string) {
+    setReactFor(null);
+    const prevReaction = m.metadata?.reaction ?? null;
+    setMessages(list => list.map(x => x.id === m.id
+      ? { ...x, metadata: { ...(x.metadata || {}), reaction: emoji || null } }
+      : x));
+    try {
+      const r = await fetch('/api/messages/react', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: m.id, emoji }),
+      });
+      if (!r.ok) throw new Error();
+    } catch {
+      setMessages(list => list.map(x => x.id === m.id
+        ? { ...x, metadata: { ...(x.metadata || {}), reaction: prevReaction } }
+        : x));
+    }
+  }
+
   // S1 #7: botão do raio abre a mesma lista do "/"
   function openQuickMessages() {
     if (showTemplates) { setShowTemplates(false); return; }
@@ -1195,12 +1239,23 @@ export default function InboxView() {
               const senderColor = groupSender ? nameColor(groupSender) : 'var(--text-muted)';
 
               return (
-                <div key={m.id} style={{
-                  display: 'flex', alignItems: 'flex-end', gap: 8,
-                  alignSelf: isSent ? 'flex-end' : 'flex-start',
-                  maxWidth: '70%',
-                  flexDirection: isSent ? 'row-reverse' : 'row',
-                }}>
+                <div key={m.id}
+                  onClick={selectMode ? () => toggleMsgSelection(m) : undefined}
+                  style={{
+                    display: 'flex', alignItems: 'flex-end', gap: 8,
+                    alignSelf: isSent ? 'flex-end' : 'flex-start',
+                    maxWidth: '70%',
+                    flexDirection: isSent ? 'row-reverse' : 'row',
+                    // relative: âncora da reação e da paleta (S2)
+                    position: 'relative',
+                    cursor: selectMode ? 'pointer' : 'default',
+                  }}>
+                  {/* #14: caixa de seleção no modo múltiplo */}
+                  {selectMode && (
+                    <div style={{ width: 19, height: 19, borderRadius: 6, flexShrink: 0, alignSelf: 'center', border: `1.5px solid ${selectedMsgs[m.id] ? 'var(--accent)' : 'var(--hairline-strong)'}`, background: selectedMsgs[m.id] ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {selectedMsgs[m.id] && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+                    </div>
+                  )}
                   {/* Sender avatar — only for inbound group messages */}
                   {isGroupContact && !isSent && (
                     <div style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0, overflow: 'hidden', background: 'var(--field-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: senderColor, alignSelf: 'flex-end', marginBottom: 0 }}>
@@ -1241,21 +1296,84 @@ export default function InboxView() {
                     )}
                     <MessageContent m={displayMsg} />
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, textAlign: 'right' }}>{formatTime(m.created_at)}</div>
+                    {/* S2: reação fica colada na base da bolha, como no WhatsApp */}
+                    {m.metadata?.reaction && (
+                      <div style={{ position: 'absolute', bottom: -11, [isSent ? 'right' : 'left']: 10, fontSize: 13, lineHeight: 1, padding: '2px 5px', borderRadius: 999, background: 'var(--bg-card)', border: '1px solid var(--hairline)', boxShadow: 'var(--shadow-xs)' } as any}>
+                        {m.metadata.reaction}
+                      </div>
+                    )}
                   </div>
-                  {/* #32: encaminhar mensagem para outro contato */}
-                  <button onClick={() => setForwardMsg(m)} title="Encaminhar"
-                    style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, opacity: 0.35, transition: 'opacity 0.15s var(--ease-out)', alignSelf: 'center' }}
-                    onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                    onMouseLeave={e => (e.currentTarget.style.opacity = '0.35')}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
-                  </button>
+                  {/* Ações da mensagem — some no modo seleção, que tem ações próprias */}
+                  {!selectMode && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignSelf: 'center', flexShrink: 0 }}>
+                      {/* S2: reagir */}
+                      <button onClick={() => setReactFor(reactFor === m.id ? null : m.id)} title="Reagir"
+                        style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--hairline)', background: reactFor === m.id ? 'var(--accent-dim)' : 'var(--field-bg)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: reactFor === m.id ? 1 : 0.35, transition: 'opacity 0.15s var(--ease-out)' }}
+                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={e => { if (reactFor !== m.id) e.currentTarget.style.opacity = '0.35'; }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                      </button>
+                      {/* #32/#14: encaminhar (clique longo/duplo entra no modo seleção) */}
+                      <button onClick={() => setForwardMsgs([m])} title="Encaminhar"
+                        onDoubleClick={() => { setSelectMode(true); setSelectedMsgs({ [m.id]: m }); }}
+                        style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.35, transition: 'opacity 0.15s var(--ease-out)' }}
+                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={e => (e.currentTarget.style.opacity = '0.35')}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
+                      </button>
+                      {/* #14: entrar no modo seleção múltipla */}
+                      <button onClick={() => { setSelectMode(true); setSelectedMsgs({ [m.id]: m }); }} title="Selecionar várias"
+                        style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.35, transition: 'opacity 0.15s var(--ease-out)' }}
+                        onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                        onMouseLeave={e => (e.currentTarget.style.opacity = '0.35')}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                      </button>
+                    </div>
+                  )}
+                  {/* S2: paleta rápida de reações */}
+                  {reactFor === m.id && (
+                    <div className="glass-modal fade-in" style={{ position: 'absolute', bottom: 'calc(100% + 4px)', [isSent ? 'right' : 'left']: 0, zIndex: 60, display: 'flex', gap: 2, padding: '5px 7px', borderRadius: 999 } as any}>
+                      {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(e => (
+                        <button key={e} onClick={() => react(m, e)}
+                          style={{ fontSize: 17, lineHeight: 1, padding: '3px 4px', background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+                          onMouseEnter={ev => (ev.currentTarget.style.background = 'var(--accent-dim)')}
+                          onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}>{e}</button>
+                      ))}
+                      {m.metadata?.reaction && (
+                        <button onClick={() => react(m, '')} title="Remover reação"
+                          style={{ fontSize: 12, padding: '3px 6px', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>×</button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
             <div ref={msgEndRef} />
           </div>
 
-          {/* Fix 7: groups and individual contacts both get the send area — barra flutuante de vidro */}
+          {/* S2 #14: barra do modo seleção — substitui o composer enquanto ativo,
+              igual ao WhatsApp quando você seleciona mensagens */}
+          {selectMode ? (
+            <div className="glass-nav anim" style={{ ['--i' as any]: 3, borderRadius: 24, padding: '10px 16px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button onClick={exitSelectMode} title="Cancelar seleção"
+                style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 15, lineHeight: 1, flexShrink: 0 }}>×</button>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>
+                {Object.keys(selectedMsgs).length} selecionada{Object.keys(selectedMsgs).length === 1 ? '' : 's'}
+              </span>
+              <button onClick={() => setSelectedMsgs(Object.fromEntries(messages.map(m => [m.id, m])))}
+                style={{ padding: '6px 12px', borderRadius: 9, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                Selecionar todas
+              </button>
+              <button
+                onClick={() => { const list = Object.values(selectedMsgs); if (list.length) setForwardMsgs(list); }}
+                disabled={Object.keys(selectedMsgs).length === 0}
+                style={{ padding: '7px 15px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.18)', background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: Object.keys(selectedMsgs).length === 0 ? 0.45 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 17 20 12 15 7" /><path d="M4 18v-2a4 4 0 0 1 4-4h12" /></svg>
+                Encaminhar
+              </button>
+            </div>
+          ) : (
+          /* Fix 7: groups and individual contacts both get the send area — barra flutuante de vidro */
           <div className="glass-nav anim" style={{ ['--i' as any]: 3, borderRadius: 24, padding: '8px 8px 8px 18px', flexShrink: 0, position: 'relative' }}>
               {/* Template picker popup — sobe de baixo, como no WhatsApp Web (S1 #7) */}
               <TemplateDropdown
@@ -1452,6 +1570,7 @@ export default function InboxView() {
                 </button>
               </div>
             </div>
+          )}
         </div>
       ) : !isMobile ? (
         <div className="glass-panel anim" style={{ ['--i' as any]: 1, flex: 1, borderRadius: 'var(--radius-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--text-muted)', fontSize: 14 }}>
@@ -1598,8 +1717,12 @@ export default function InboxView() {
       )}
 
       {/* #32: modal de encaminhamento — portal por causa do containing block do backdrop-filter */}
-      {forwardMsg && createPortal(
-        <ForwardModal message={forwardMsg} onClose={() => setForwardMsg(null)} />,
+      {forwardMsgs && createPortal(
+        <ForwardModal
+          messages={forwardMsgs}
+          onClose={() => setForwardMsgs(null)}
+          onSent={exitSelectMode}
+        />,
         document.body
       )}
     </div>
@@ -1607,78 +1730,142 @@ export default function InboxView() {
 }
 
 // #32: escolhe o contato de destino e reenvia a mensagem (texto ou mídia do Storage)
-function ForwardModal({ message, onClose }: { message: Message; onClose: () => void }) {
+/**
+ * Modal de encaminhar (S1 #13/#14, 27/07).
+ * Antes era 1 mensagem → 1 contato, com o envio disparando no clique do contato.
+ * Agora recebe N mensagens (modo seleção) e permite marcar N destinos, com um
+ * botão de confirmação — igual ao WhatsApp. O resultado é por par mensagem×destino,
+ * então um contato sem telefone não derruba os outros.
+ */
+function ForwardModal({ messages, onClose, onSent }: {
+  messages: Message[];
+  onClose: () => void;
+  onSent?: () => void;
+}) {
   const [search, setSearch] = useState('');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sendingTo, setSendingTo] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, Contact>>({});
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
-  const [done, setDone] = useState(false);
+  const [summary, setSummary] = useState<{ sent: number; failed: number; errors: string[] } | null>(null);
+
+  const originContactId = messages[0]?.contact_id;
 
   useEffect(() => {
     const t = setTimeout(() => {
       const q = search.trim() ? `&search=${encodeURIComponent(search.trim())}` : '';
       fetch(`/api/contacts?limit=20&exclude_source=whatsapp_group${q}`)
         .then(r => r.json())
-        .then(d => { setContacts((d.contacts || []).filter((c: Contact) => c.id !== message.contact_id && c.phone)); setLoading(false); })
+        .then(d => { setContacts((d.contacts || []).filter((c: Contact) => c.id !== originContactId && c.phone)); setLoading(false); })
         .catch(() => setLoading(false));
     }, 250);
     return () => clearTimeout(t);
-  }, [search, message.contact_id]);
+  }, [search, originContactId]);
 
-  async function forwardTo(c: Contact) {
-    if (sendingTo) return;
-    setSendingTo(c.id);
-    setError('');
+  const chosen = Object.values(selected);
+
+  function toggle(c: Contact) {
+    setSelected(prev => {
+      const next = { ...prev };
+      if (next[c.id]) delete next[c.id]; else next[c.id] = c;
+      return next;
+    });
+  }
+
+  async function send() {
+    if (sending || chosen.length === 0) return;
+    setSending(true); setError(''); setSummary(null);
     try {
       const r = await fetch('/api/messages/forward', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message_id: message.id, target_contact_id: c.id }),
+        body: JSON.stringify({
+          message_ids: messages.map(m => m.id),
+          target_contact_ids: chosen.map(c => c.id),
+        }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(d.error || 'Falha ao encaminhar.'); setSendingTo(null); return; }
-      setDone(true);
-      setTimeout(onClose, 900);
+      if (!r.ok && !d.results) { setError(d.error || 'Falha ao encaminhar.'); setSending(false); return; }
+      const errors = [...new Set((d.results || []).filter((x: any) => !x.ok).map((x: any) => `${x.contact_name || 'contato'}: ${x.error}`))] as string[];
+      setSummary({ sent: d.sent || 0, failed: d.failed || 0, errors: errors.slice(0, 4) });
+      if (!d.failed) { onSent?.(); setTimeout(onClose, 1000); }
     } catch {
       setError('Erro de rede ao encaminhar.');
-      setSendingTo(null);
     }
+    setSending(false);
   }
+
+  const preview = messages.length === 1
+    ? (messages[0].content_type === 'text' ? (messages[0].body || '') : `[${messages[0].content_type}] ${messages[0].body || ''}`)
+    : `${messages.length} mensagens selecionadas`;
 
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div className="glass-modal modal-pop" onClick={e => e.stopPropagation()}
-        style={{ width: 'min(400px, 94vw)', maxHeight: '70vh', borderRadius: 18, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        style={{ width: 'min(400px, 94vw)', maxHeight: '76vh', borderRadius: 18, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 14.5, fontWeight: 700 }}>Encaminhar para…</div>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14 }}>×</button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '7px 10px', borderRadius: 9, background: 'var(--field-bg)', border: '1px solid var(--hairline)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {message.content_type === 'text' ? (message.body || '') : `[${message.content_type}] ${message.body || ''}`}
+          {preview}
         </div>
         <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar contato…"
           style={{ padding: '9px 12px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 10, color: 'var(--text-primary)', fontSize: 13, outline: 'none', fontFamily: 'inherit' }} />
-        {done && <div style={{ fontSize: 12.5, color: 'var(--green)', fontWeight: 600, textAlign: 'center' }}>Mensagem encaminhada ✓</div>}
+
+        {summary && (
+          <div style={{ fontSize: 12, textAlign: 'center', color: summary.failed ? 'var(--amber)' : 'var(--green)', fontWeight: 600 }}>
+            {summary.sent > 0 && `${summary.sent} envio${summary.sent > 1 ? 's' : ''} concluído${summary.sent > 1 ? 's' : ''}`}
+            {summary.failed > 0 && `${summary.sent > 0 ? ' · ' : ''}${summary.failed} falhou`}
+            {summary.errors.length > 0 && (
+              <div style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.45 }}>
+                {summary.errors.map((e, i) => <div key={i}>{e}</div>)}
+              </div>
+            )}
+          </div>
+        )}
         {error && <div style={{ fontSize: 12, color: '#f87171', textAlign: 'center' }}>{error}</div>}
-        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 120 }}>
+
+        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 110, flex: 1 }}>
           {loading && <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 16 }}>Carregando…</div>}
           {!loading && contacts.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 16 }}>Nenhum contato encontrado.</div>}
-          {contacts.map(c => (
-            <button key={c.id} onClick={() => forwardTo(c)} disabled={!!sendingTo}
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', opacity: sendingTo && sendingTo !== c.id ? 0.5 : 1, transition: 'background 0.15s var(--ease-out)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-              <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--field-bg)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', flexShrink: 0 }}>
-                {c.photo_url ? <img src={c.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (c.name || '?').charAt(0).toUpperCase()}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
-                <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{sendingTo === c.id ? 'Enviando…' : c.phone}</div>
-              </div>
-            </button>
-          ))}
+          {contacts.map(c => {
+            const on = !!selected[c.id];
+            return (
+              <button key={c.id} onClick={() => toggle(c)} disabled={sending}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 10, border: 'none', background: on ? 'var(--accent-dim)' : 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', transition: 'background 0.15s var(--ease-out)' }}
+                onMouseEnter={e => { if (!on) e.currentTarget.style.background = 'var(--field-bg)'; }}
+                onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent'; }}>
+                <div style={{ width: 18, height: 18, borderRadius: 5, flexShrink: 0, border: `1.5px solid ${on ? 'var(--accent)' : 'var(--hairline-strong)'}`, background: on ? 'var(--accent)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {on && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+                </div>
+                <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'var(--field-bg)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', flexShrink: 0 }}>
+                  {c.photo_url ? <img src={c.photo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (c.name || '?').charAt(0).toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{c.phone}</div>
+                </div>
+              </button>
+            );
+          })}
         </div>
+
+        <button onClick={send} disabled={sending || chosen.length === 0}
+          style={{
+            padding: '10px 16px', borderRadius: 11, border: '1px solid rgba(255,255,255,0.18)',
+            background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff',
+            fontSize: 13, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0,
+            cursor: sending || chosen.length === 0 ? 'default' : 'pointer',
+            opacity: sending || chosen.length === 0 ? 0.45 : 1,
+          }}>
+          {sending
+            ? 'Enviando…'
+            : chosen.length === 0
+              ? 'Selecione os destinos'
+              : `Encaminhar ${messages.length > 1 ? `${messages.length} mensagens ` : ''}para ${chosen.length} contato${chosen.length > 1 ? 's' : ''}`}
+        </button>
       </div>
     </div>
   );
