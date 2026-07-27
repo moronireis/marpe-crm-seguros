@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import CampaignWizard from './CampaignWizard';
 
 interface Template { id: string; name: string; body: string; }
 interface Campaign {
@@ -181,166 +182,15 @@ export default function CampaignsView() {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
 
-        {/* Create form */}
+        {/* S5 (27/07): o formulário inline virou o wizard de 4 estágios do PDF
+            (Destinatários > Ações > Envio > Resultados). O antigo era um painel
+            único, sem tipo de mensagem e sem relatório por destinatário. */}
         {showForm && (
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Nova campanha</div>
-
-            {/* Basic fields */}
-            <div style={{ marginBottom: 4 }}>
-              <span style={label}>Nome</span>
-              <input
-                style={inp}
-                placeholder="Ex: Renovações Auto — Junho"
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              />
-            </div>
-            <div style={{ marginBottom: 4 }}>
-              <span style={label}>Template de mensagem</span>
-              <select style={inp} value={form.template_id} onChange={e => setForm(f => ({ ...f, template_id: e.target.value }))}>
-                <option value="">Selecionar template...</option>
-                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-
-            <div style={sectionDivider} />
-
-            {/* Segmentation toggle */}
-            <button
-              onClick={() => setShowSegment(s => !s)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 6, marginBottom: showSegment ? 14 : 0, color: 'var(--text-secondary)', fontFamily: 'inherit' }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: showSegment ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Segmentação</span>
-              {hasFilters(segment) && (
-                <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 4 }}>(filtros ativos)</span>
-              )}
-            </button>
-
-            {showSegment && (
-              <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 16, marginBottom: 14 }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.5 }}>
-                  Todos os filtros são opcionais. <strong style={{ color: 'var(--text-secondary)' }}>Nenhum filtro = todos os contatos com telefone.</strong>
-                </div>
-
-                {/* Tags */}
-                <div style={{ marginBottom: 14 }}>
-                  <span style={label}>Tags</span>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {TAG_OPTIONS.map(tag => {
-                      const active = segment.tags?.includes(tag);
-                      return (
-                        <button
-                          key={tag}
-                          onClick={() => toggleTag(tag)}
-                          style={{
-                            padding: '5px 12px', borderRadius: 20, fontSize: 12, fontFamily: 'inherit',
-                            cursor: 'pointer', fontWeight: 500,
-                            border: active ? 'none' : '1px solid var(--border)',
-                            background: active ? 'var(--accent)' : 'transparent',
-                            color: active ? '#fff' : 'var(--text-secondary)',
-                            transition: 'all 0.12s',
-                          }}
-                        >
-                          {RAMO_LABELS[tag] || tag}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Ramo */}
-                <div style={{ marginBottom: 14 }}>
-                  <span style={label}>Ramo de seguro</span>
-                  <select
-                    style={{ ...inp, marginBottom: 0 }}
-                    value={segment.ramo || ''}
-                    onChange={e => setSegment(s => ({ ...s, ramo: e.target.value || undefined }))}
-                  >
-                    <option value="">Todos os ramos</option>
-                    {RAMO_OPTIONS.map(r => <option key={r} value={r}>{RAMO_LABELS[r]}</option>)}
-                  </select>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                    Contatos que têm ao menos um negócio com este ramo
-                  </div>
-                </div>
-
-                {/* Cidade */}
-                <div style={{ marginBottom: 14 }}>
-                  <span style={label}>Cidade</span>
-                  <input
-                    style={{ ...inp, marginBottom: 0 }}
-                    placeholder="Ex: São Paulo"
-                    value={segment.city || ''}
-                    onChange={e => setSegment(s => ({ ...s, city: e.target.value || undefined }))}
-                  />
-                </div>
-
-                {/* Produtor */}
-                <div style={{ marginBottom: 14 }}>
-                  <span style={label}>Produtor</span>
-                  <input
-                    style={{ ...inp, marginBottom: 0 }}
-                    placeholder="Nome do produtor"
-                    value={segment.produtor || ''}
-                    onChange={e => setSegment(s => ({ ...s, produtor: e.target.value || undefined }))}
-                  />
-                </div>
-
-                {/* Tipo de negócio */}
-                <div>
-                  <span style={label}>Tipo de negócio</span>
-                  <select
-                    style={{ ...inp, marginBottom: 0 }}
-                    value={segment.deal_type || ''}
-                    onChange={e => setSegment(s => ({ ...s, deal_type: e.target.value || undefined }))}
-                  >
-                    <option value="">Todos os tipos</option>
-                    {DEAL_TYPE_OPTIONS.map(dt => <option key={dt} value={dt}>{DEAL_TYPE_LABELS[dt]}</option>)}
-                  </select>
-                </div>
-
-                {/* Preview count */}
-                <div style={{ marginTop: 14, padding: '10px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                  </svg>
-                  {previewLoading ? (
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Calculando...</span>
-                  ) : previewCount !== null ? (
-                    <span style={{ fontSize: 12 }}>
-                      <strong style={{ color: 'var(--accent)', fontSize: 14 }}>{previewCount}</strong>
-                      <span style={{ color: 'var(--text-secondary)', marginLeft: 4 }}>
-                        {previewCount === 1 ? 'contato será alcançado' : 'contatos serão alcançados'}
-                      </span>
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>— contatos</span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Compact preview when segment is collapsed but has filters */}
-            {!showSegment && hasFilters(segment) && (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10, marginTop: 6 }}>
-                Segmento: {segmentSummary(segment)}
-                {previewCount !== null && (
-                  <span style={{ color: 'var(--accent)', marginLeft: 8 }}>{previewCount} contatos</span>
-                )}
-              </div>
-            )}
-
-            {error && <div style={{ fontSize: 12, color: '#f87171', marginBottom: 8 }}>{error}</div>}
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={createCampaign} disabled={saving} style={btn(true)}>{saving ? 'Salvando...' : 'Criar campanha'}</button>
-              <button onClick={() => { setShowForm(false); setSegment({}); setPreviewCount(null); }} style={btn()}>Cancelar</button>
-            </div>
-          </div>
+          <CampaignWizard
+            templates={templates}
+            onClose={() => setShowForm(false)}
+            onCreated={load}
+          />
         )}
 
         {/* Campaign list */}

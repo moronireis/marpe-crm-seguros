@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../../lib/api-auth';
 import { createServerClient } from '../../../../lib/supabase-server';
-import { sendWhatsAppText } from '../../../../lib/whatsapp/send';
+import { sendWhatsAppText, sendWhatsAppMedia, sendWhatsAppCarousel } from '../../../../lib/whatsapp/send';
 import { interpolateVariables } from '../../../../lib/variables';
 import { resolveContactIds } from '../../../../lib/campaigns/resolve-contacts';
 
@@ -30,8 +30,21 @@ export const POST: APIRoute = async ({ locals, params }) => {
   if (campaign.status === 'sending' || campaign.status === 'sent') {
     return new Response(JSON.stringify({ error: 'Campaign already sent or in progress' }), { status: 409 });
   }
-  if (!campaign.marpe_templates?.body) {
-    return new Response(JSON.stringify({ error: 'Campaign has no template' }), { status: 400 });
+
+  // S5 (27/07): três tipos de mensagem (PDF Campanha) — o corpo pode vir do
+  // template OU de um texto personalizado; mídia e carrossel guardam o payload
+  // em `media`. Variáveis valem para os três, como o PDF pede.
+  const messageType: 'text' | 'media' | 'carousel' = campaign.message_type || 'text';
+  const baseBody: string = campaign.body_override || campaign.marpe_templates?.body || '';
+
+  if (messageType === 'text' && !baseBody.trim()) {
+    return new Response(JSON.stringify({ error: 'Campanha sem texto: escolha um template ou escreva a mensagem' }), { status: 400 });
+  }
+  if (messageType === 'media' && !campaign.media?.dataUri) {
+    return new Response(JSON.stringify({ error: 'Campanha de mídia sem arquivo' }), { status: 400 });
+  }
+  if (messageType === 'carousel' && !campaign.media?.cards?.length) {
+    return new Response(JSON.stringify({ error: 'Carrossel sem fotos' }), { status: 400 });
   }
 
   // Resolve contacts from segment filter
@@ -71,8 +84,28 @@ export const POST: APIRoute = async ({ locals, params }) => {
     for (const contact of contacts) {
       if (!contact.phone) continue;
 
-      const message = interpolateVariables(campaign.marpe_templates.body, { contact });
-      const result = await sendWhatsAppText(contact.phone, message, contact.id);
+      // Variáveis resolvidas por destinatário — vale para os três tipos
+      const message = baseBody ? interpolateVariables(baseBody, { contact }) : '';
+
+      let result;
+      if (messageType === 'media') {
+        result = await sendWhatsAppMedia(contact.phone, {
+          type: campaign.media.type || 'image',
+          dataUri: campaign.media.dataUri,
+          caption: message || undefined,
+          filename: campaign.media.filename,
+        }, contact.id);
+      } else if (messageType === 'carousel') {
+        result = await sendWhatsAppCarousel(contact.phone, {
+          text: message || undefined,
+          cards: (campaign.media.cards || []).map((c: any) => ({
+            image: c.image,
+            text: c.text ? interpolateVariables(c.text, { contact }) : undefined,
+          })),
+        }, contact.id);
+      } else {
+        result = await sendWhatsAppText(contact.phone, message, contact.id);
+      }
 
       await sb.from('marpe_campaign_recipients').insert({
         campaign_id: id,

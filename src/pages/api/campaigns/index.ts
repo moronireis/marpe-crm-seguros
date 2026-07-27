@@ -41,6 +41,10 @@ export const POST: APIRoute = async ({ locals, request }) => {
       status: 'draft',
       scheduled_at: body.scheduled_at || null,
       created_by: profile.id,
+      // S5 (27/07): três tipos de mensagem + texto personalizado sem template
+      message_type: ['text', 'media', 'carousel'].includes(body.message_type) ? body.message_type : 'text',
+      body_override: body.body_override || null,
+      media: body.media || null,
     })
     .select()
     .single();
