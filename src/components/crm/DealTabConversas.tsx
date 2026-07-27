@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
+import AudioPlayer from '../shared/AudioPlayer';
 import { interpolateVariables, type InterpolationContext } from '../../lib/variables';
 
 interface Message {
@@ -10,6 +11,7 @@ interface Message {
   created_at: string;
   sent_by: string | null;
   media_url: string | null;
+  media_mime?: string | null;
 }
 
 interface Props {
@@ -126,6 +128,18 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
   }
 
   useEffect(() => { loadMessages(); }, [dealId, contactId]);
+
+  // S1 #2 (27/07): scroll infinito para cima, no lugar do botão no topo
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    function onScroll() {
+      if (!list) return;
+      if (list.scrollTop < 100 && hasMore && !loadingOlder && !loading) loadOlder();
+    }
+    list.addEventListener('scroll', onScroll, { passive: true });
+    return () => list.removeEventListener('scroll', onScroll);
+  }, [hasMore, loadingOlder, loading, dealId, contactId, msgs.length]);
 
   // Poll every 5s
   useEffect(() => {
@@ -294,12 +308,13 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
       )}
 
       {/* Messages */}
-      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {!loading && hasMore && (
-          <button onClick={loadOlder} disabled={loadingOlder}
-            style={{ alignSelf: 'center', padding: '5px 14px', borderRadius: 999, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 10.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, opacity: loadingOlder ? 0.6 : 1 }}>
-            {loadingOlder ? 'Carregando…' : 'Carregar mensagens anteriores'}
-          </button>
+      {/* S1 #2 (27/07): mesma correção do Inbox nesta tela — sem barra de rolagem
+          horizontal e sem o botão-barra no topo (o scroll infinito puxa sozinho). */}
+      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '12px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {loadingOlder && (
+          <div style={{ alignSelf: 'center', padding: '3px 0', color: 'var(--text-muted)', fontSize: 10.5, flexShrink: 0 }}>
+            Carregando mensagens anteriores…
+          </div>
         )}
         {loading && <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>Carregando...</div>}
         {!loading && msgs.length === 0 && (
@@ -321,8 +336,13 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
               {m.content_type === 'image' && m.media_url && (
                 <img src={m.media_url} alt="" style={{ maxWidth: '100%', borderRadius: 6, marginBottom: m.body ? 6 : 0 }} loading="lazy" />
               )}
+              {/* S1 #3 (27/07): era `<audio controls>` nativo — a barra branca do
+                  navegador que o Marcel apontou. Agora usa o mesmo player do Inbox
+                  (e entra no controle de "um áudio por vez" do #12). */}
               {m.content_type === 'audio' && m.media_url && (
-                <audio controls src={m.media_url} style={{ maxWidth: '100%', marginBottom: m.body ? 6 : 0 }} />
+                <div style={{ marginBottom: m.body ? 6 : 0 }}>
+                  <AudioPlayer src={m.media_url} mime={m.media_mime} />
+                </div>
               )}
               {m.content_type === 'document' && m.media_url && (
                 <a href={m.media_url} target="_blank" rel="noopener" style={{ fontSize: 11, color: 'var(--accent-light)', display: 'block', marginBottom: m.body ? 6 : 0 }}>

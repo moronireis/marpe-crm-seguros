@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
+import AudioPlayer from '../shared/AudioPlayer';
 import { maskPhone, validPhone, validEmail } from '../../lib/masks';
 import { interpolateVariables } from '../../lib/variables';
 
@@ -34,230 +35,6 @@ function resolveMediaUrl(m: Message): string | null {
   if (m.media_url && !m.media_url.includes('whatsapp.net')) return m.media_url;
   if (m.wa_message_id) return `/api/media/download?msgid=${encodeURIComponent(m.wa_message_id)}`;
   return null;
-}
-
-// WhatsApp-style audio player — Canvas waveform + rAF smooth progress + drag-to-seek
-function AudioPlayer({ src, mime, avatarUrl }: { src: string | null; mime: string | null; avatarUrl?: string | null }) {
-  const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [progress, setProgress] = useState(0); // 0-1
-  const [loadError, setLoadError] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
-  const dragging = useRef(false);
-
-  // Deterministic waveform heights from src URL
-  const bars = useMemo(() => {
-    const n = 52;
-    const seed = src || 'x';
-    return Array.from({ length: n }, (_, i) => {
-      const v = Math.abs(Math.sin(i * 127.1 + seed.charCodeAt(i % seed.length) * 0.031) * 43758.5) % 1;
-      const shape = Math.sin((i / n) * Math.PI); // bell curve shape
-      return Math.max(0.08, Math.min(1, v * 0.55 + shape * 0.55));
-    });
-  }, [src]);
-
-  // Draw canvas waveform
-  const draw = useRef((prog: number) => {});
-  draw.current = (prog: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
-    }
-    const ctx = canvas.getContext('2d')!;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.scale(dpr, dpr);
-
-    const n = bars.length;
-    const barW = 2.5;
-    const gap = (w - n * barW) / (n - 1);
-    const cx = prog * w; // playhead x
-
-    for (let i = 0; i < n; i++) {
-      const x = i * (barW + gap);
-      const barH = Math.round(bars[i] * (h - 6) + 5);
-      const y = (h - barH) / 2;
-      const filled = x + barW <= cx;
-      const atHead = !filled && x <= cx + barW;
-
-      // Filled = accent, head bar = lighter accent, unfilled = muted
-      if (filled) {
-        ctx.fillStyle = 'rgba(96,165,250,0.9)';
-      } else if (atHead && prog > 0) {
-        ctx.fillStyle = 'rgba(147,197,253,0.7)';
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-      }
-
-      ctx.beginPath();
-      ctx.roundRect(x, y, barW, barH, 1.5);
-      ctx.fill();
-    }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-  };
-
-  // rAF loop for smooth progress
-  useEffect(() => {
-    function tick() {
-      const el = audioRef.current;
-      if (el && el.duration > 0) {
-        const p = el.currentTime / el.duration;
-        setProgress(p);
-        draw.current(p);
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    }
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, []);
-
-  // Redraw on resize
-  useEffect(() => {
-    const ro = new ResizeObserver(() => draw.current(progress));
-    if (canvasRef.current) ro.observe(canvasRef.current);
-    return () => ro.disconnect();
-  }, [progress]);
-
-  function togglePlay() {
-    const el = audioRef.current;
-    if (!el || loadError) return;
-    if (playing) {
-      el.pause();
-      setPlaying(false);
-    } else {
-      el.play()
-        .then(() => setPlaying(true))
-        .catch(() => setLoadError(true));
-    }
-  }
-
-  function seek(clientX: number, rect: DOMRect) {
-    const el = audioRef.current;
-    if (!el || !el.duration) return;
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    el.currentTime = ratio * el.duration;
-    setProgress(ratio);
-    draw.current(ratio);
-  }
-
-  function fmt(s: number) {
-    if (!isFinite(s) || s <= 0) return '0:00';
-    const m = Math.floor(s / 60);
-    return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
-  }
-
-  const elapsed = audioRef.current ? audioRef.current.currentTime : 0;
-  const displayTime = playing || progress > 0 ? fmt(elapsed) : (duration > 0 ? fmt(duration) : '0:00');
-
-  if (!src) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-        Áudio indisponível
-      </div>
-    );
-  }
-
-  if (loadError) {
-    // Proxy 410 (expirada na UazapiGO) ou rede — estado terminal, sem link morto (fix #21)
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
-        Áudio expirado — peça para reenviar
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 230, maxWidth: 290, userSelect: 'none' }}>
-      {/* Avatar / mic */}
-      <div style={{
-        width: 40, height: 40, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
-        background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.22)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        {avatarUrl
-          ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-          : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(96,165,250,0.8)" strokeWidth="1.8" strokeLinecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-        }
-      </div>
-
-      {/* Controls */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* Play / Pause */}
-          <button
-            onClick={togglePlay}
-            style={{
-              width: 32, height: 32, borderRadius: '50%', flexShrink: 0, border: 'none',
-              background: playing ? 'rgba(59,130,246,0.85)' : 'var(--accent)',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: playing ? '0 0 0 4px rgba(59,130,246,0.18), 0 2px 8px rgba(59,130,246,0.3)' : '0 2px 8px rgba(59,130,246,0.25)',
-              transition: 'box-shadow 0.2s, transform 0.1s',
-            }}
-            onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.92)')}
-            onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
-            onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
-          >
-            {playing
-              ? <svg width="11" height="11" viewBox="0 0 24 24" fill="white"><rect x="5" y="4" width="4" height="16" rx="1"/><rect x="15" y="4" width="4" height="16" rx="1"/></svg>
-              : <svg width="11" height="11" viewBox="0 0 24 24" fill="white" style={{ marginLeft: 2 }}><polygon points="5 3 19 12 5 21"/></svg>
-            }
-          </button>
-
-          {/* Canvas waveform */}
-          <canvas
-            ref={canvasRef}
-            style={{ flex: 1, height: 34, cursor: 'pointer', display: 'block' }}
-            onMouseDown={e => {
-              dragging.current = true;
-              seek(e.clientX, (e.currentTarget as HTMLCanvasElement).getBoundingClientRect());
-            }}
-            onMouseMove={e => {
-              if (!dragging.current) return;
-              seek(e.clientX, (e.currentTarget as HTMLCanvasElement).getBoundingClientRect());
-            }}
-            onMouseUp={() => { dragging.current = false; }}
-            onMouseLeave={() => { dragging.current = false; }}
-            onTouchStart={e => {
-              const touch = e.touches[0];
-              seek(touch.clientX, (e.currentTarget as HTMLCanvasElement).getBoundingClientRect());
-            }}
-            onTouchMove={e => {
-              const touch = e.touches[0];
-              seek(touch.clientX, (e.currentTarget as HTMLCanvasElement).getBoundingClientRect());
-            }}
-          />
-        </div>
-
-        {/* Time */}
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', paddingLeft: 40, letterSpacing: '0.02em' }}>
-          {displayTime}
-        </div>
-      </div>
-
-      <audio
-        ref={audioRef}
-        preload="metadata"
-        onLoadedMetadata={() => { setDuration(audioRef.current?.duration || 0); setLoaded(true); }}
-        onEnded={() => { setPlaying(false); setProgress(0); draw.current(0); }}
-        onError={() => setLoadError(true)}
-        style={{ display: 'none' }}
-      >
-        <source src={src} type="audio/ogg" />
-        <source src={src} type="audio/mpeg" />
-        <source src={src} type="audio/mp4" />
-        <source src={src} type="audio/ogg; codecs=opus" />
-      </audio>
-    </div>
-  );
 }
 
 // Render the correct element based on content_type
@@ -316,19 +93,26 @@ function MessageContent({ m }: { m: Message }) {
       <div>
         {src ? (
           <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000', maxWidth: 280 }}>
+            {/* S1 #8 (27/07): o `<source type=...>` fazia o navegador recusar o vídeo
+                quando o mime gravado não batia com o real (ex.: proxy devolve video/webm
+                e tínhamos gravado video/mp4) — e o onError pintava "expirado" num vídeo
+                que estava bom. Agora o src vai direto no elemento (o navegador detecta
+                o tipo) e o fallback só aparece se o próprio media element registrar erro. */}
             <video
               controls
               preload="metadata"
+              src={src}
               style={{ width: '100%', display: 'block', maxHeight: 200 }}
               onError={(e) => {
                 const el = e.currentTarget;
+                // MEDIA_ERR_SRC_NOT_SUPPORTED (4) / MEDIA_ERR_NETWORK (2) = realmente morreu.
+                // Sem el.error é evento transitório — não marca como expirado.
+                if (!el.error) return;
                 el.style.display = 'none';
                 const fallback = el.nextElementSibling as HTMLElement | null;
                 if (fallback) fallback.style.display = 'flex';
               }}
-            >
-              <source src={src} type={media_mime || 'video/mp4'} />
-            </video>
+            />
             <div style={{ display: 'none', padding: '10px 12px', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
               Vídeo expirado — peça para reenviar
@@ -404,23 +188,57 @@ function MessageContent({ m }: { m: Message }) {
   return <>{formatWaText(body || '')}</>;
 }
 
+// Transforma URLs em links clicáveis (S1 #5, 27/07 — links de Meet/Teams vinham
+// como texto morto). Reconhece http(s):// e domínios soltos tipo "meet.google.com/abc".
+// A pontuação final ( ) . , ! ? fica FORA do link — senão "acesse http://x.com."
+// levava o ponto junto e quebrava a URL.
+const URL_RE = /\b((?:https?:\/\/|www\.)[^\s<]+|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|com\.br|br|net|org|io|app|dev|me|gov\.br|edu\.br)(?:\/[^\s<]*)?)/gi;
+
+function linkify(text: string, keyBase: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let i = 0;
+  for (let m = URL_RE.exec(text); m; m = URL_RE.exec(text)) {
+    let raw = m[0];
+    // devolve a pontuação final ao texto
+    const trail = raw.match(/[.,;:!?)\]}]+$/);
+    if (trail) raw = raw.slice(0, -trail[0].length);
+    if (!raw) continue;
+    const start = m.index;
+    if (start > last) out.push(text.slice(last, start));
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    out.push(
+      <a key={`${keyBase}-l${i++}`} href={href} target="_blank" rel="noopener noreferrer"
+        style={{ color: 'var(--accent-light)', textDecoration: 'underline', wordBreak: 'break-all' }}
+        onClick={e => e.stopPropagation()}>
+        {raw}
+      </a>
+    );
+    last = start + raw.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out.length ? out : [text];
+}
+
 // Renderiza a formatação leve do WhatsApp: *negrito*, _itálico_, ~tachado~ e
-// ```mono``` (S3.9, issue #8 — antes os marcadores apareciam crus no chat).
+// ```mono``` (S3.9, issue #8 — antes os marcadores apareciam crus no chat),
+// já com os links clicáveis dentro de cada trecho (S1 #5).
 function formatWaText(text: string): React.ReactNode {
-  if (!text || !/[*_~`]/.test(text)) return text;
+  if (!text) return text;
+  if (!/[*_~`]/.test(text)) return <>{linkify(text, 'p')}</>;
   const parts: React.ReactNode[] = [];
   const re = /\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~|```([\s\S]+?)```/g;
   let last = 0;
   let mIdx = 0;
   for (let match = re.exec(text); match; match = re.exec(text)) {
-    if (match.index > last) parts.push(text.slice(last, match.index));
-    if (match[1] !== undefined) parts.push(<strong key={mIdx++}>{match[1]}</strong>);
-    else if (match[2] !== undefined) parts.push(<em key={mIdx++}>{match[2]}</em>);
+    if (match.index > last) parts.push(...linkify(text.slice(last, match.index), `t${mIdx}`));
+    if (match[1] !== undefined) parts.push(<strong key={mIdx++}>{linkify(match[1], `b${mIdx}`)}</strong>);
+    else if (match[2] !== undefined) parts.push(<em key={mIdx++}>{linkify(match[2], `i${mIdx}`)}</em>);
     else if (match[3] !== undefined) parts.push(<s key={mIdx++}>{match[3]}</s>);
     else if (match[4] !== undefined) parts.push(<code key={mIdx++} style={{ fontSize: '0.92em', background: 'var(--field-bg)', padding: '1px 5px', borderRadius: 5 }}>{match[4]}</code>);
     last = match.index + match[0].length;
   }
-  if (last < text.length) parts.push(text.slice(last));
+  if (last < text.length) parts.push(...linkify(text.slice(last), `e${mIdx}`));
   return <>{parts}</>;
 }
 
@@ -784,6 +602,21 @@ export default function InboxView() {
     } catch {}
     setLoadingOlder(false);
   }
+
+  // S1 #1 (27/07): scroll infinito no lugar do botão "Carregar anteriores" —
+  // ao chegar perto do topo, puxa a janela anterior sozinho (padrão WhatsApp Web).
+  useEffect(() => {
+    const list = msgListRef.current;
+    if (!list) return;
+    function onScroll() {
+      if (!list) return;
+      if (list.scrollTop < 120 && hasMoreMsgs && !loadingOlder && !loadingMsgs) {
+        loadOlderMessages();
+      }
+    }
+    list.addEventListener('scroll', onScroll, { passive: true });
+    return () => list.removeEventListener('scroll', onScroll);
+  }, [hasMoreMsgs, loadingOlder, loadingMsgs, activeContactId, messages.length]);
 
   // Scroll to bottom on new messages — só quando a ÚLTIMA mensagem muda
   // (#30: prepend de "Carregar anteriores" não pode jogar o scroll para o fim)
@@ -1213,13 +1046,16 @@ export default function InboxView() {
             )}
           </div>
 
-          <div ref={msgListRef} className="glass-panel anim" style={{ ['--i' as any]: 2, flex: 1, borderRadius: 'var(--radius-lg)', overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {/* #30: a conversa abre na janela mais recente — botão puxa as anteriores */}
-            {!loadingMsgs && hasMoreMsgs && (
-              <button onClick={loadOlderMessages} disabled={loadingOlder}
-                style={{ alignSelf: 'center', padding: '6px 16px', borderRadius: 999, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, opacity: loadingOlder ? 0.6 : 1 }}>
-                {loadingOlder ? 'Carregando…' : 'Carregar mensagens anteriores'}
-              </button>
+          {/* S1 #1 (27/07): overflowX hidden mata a barra de rolagem horizontal que
+              aparecia no rodapé do painel (uma URL longa numa bolha estourava a largura)
+              e comia altura da janela de conversa. */}
+          <div ref={msgListRef} className="glass-panel anim" style={{ ['--i' as any]: 2, flex: 1, borderRadius: 'var(--radius-lg)', overflowY: 'auto', overflowX: 'hidden', padding: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* S1 #1: sem botão-barra no topo — o scroll infinito puxa sozinho.
+                Aqui fica só o indicador enquanto carrega, como no WhatsApp Web. */}
+            {loadingOlder && (
+              <div style={{ alignSelf: 'center', padding: '4px 0', color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>
+                Carregando mensagens anteriores…
+              </div>
             )}
             {loadingMsgs ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8 }}>
@@ -1291,6 +1127,9 @@ export default function InboxView() {
                     borderBottomRightRadius: isSent ? 4 : 16,
                     borderBottomLeftRadius: isSent ? 16 : 4,
                     minWidth: 0, flex: '0 1 auto',
+                    // S1 #1: URL/palavra longa não pode esticar a bolha — era o que
+                    // criava a barra de rolagem horizontal no painel de mensagens.
+                    overflowWrap: 'anywhere', wordBreak: 'break-word',
                     boxShadow: isSent ? '0 2px 10px rgba(59,130,246,0.12), inset 0 1px 0 var(--highlight)' : 'var(--shadow-xs)',
                   }}>
                     {isAuto && <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Automacao</div>}

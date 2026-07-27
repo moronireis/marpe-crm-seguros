@@ -554,21 +554,24 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   // Save message — media_url and media_mime stored for attachment rendering in inbox
-  // Note: group messages are always inbound and never trigger deals or automations
+  // Note: group messages never trigger deals or automations, mas a DIREÇÃO vale
+  // para grupo também (S1 #10, 27/07): antes gravávamos todo grupo como 'inbound',
+  // então no chat as mensagens da própria corretora apareciam empilhadas à esquerda.
   await sb.from('marpe_messages').insert({
     contact_id: contactId,
     wa_message_id: messageId || null,
-    direction: isGroup ? 'inbound' : (fromMe ? 'outbound' : 'inbound'),
+    direction: fromMe ? 'outbound' : 'inbound',
     content_type: finalContentType,
     body: finalBody || null,
     media_url: finalMediaUrl,
     media_mime: finalMime,
-    status: isGroup ? 'delivered' : (fromMe ? 'sent' : 'delivered'),
+    status: fromMe ? 'sent' : 'delivered',
     metadata: {
       event_type: body.EventType,
       timestamp,
       instance: body.instanceName,
       is_group: isGroup,
+      from_me: fromMe,
       // Debug: store raw type fields so we can inspect what UazapiGO sends
       raw_type: messageType,
       baileys_key: baileysType || null,
