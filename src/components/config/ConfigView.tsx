@@ -631,7 +631,20 @@ function WhatsAppQrPanel({ waStatus, onStatusChange }: {
       {/* Error */}
       {phase === 'error' && (
         <div>
-          <div style={{ fontSize: 12, color: '#f87171', marginBottom: 12 }}>{errorMsg}</div>
+          <div style={{ fontSize: 12, color: '#f87171', marginBottom: 8 }}>{errorMsg}</div>
+          {/* S1 (PDF Sync §8, 27/07): "UazapiGO connect error 401" não é erro de rede
+              nem de QR — é o TOKEN da instância recusado pela Uazapi ("Invalid token").
+              Tentar de novo nunca resolve; quem resolve é o painel da Uazapi. Então a
+              tela passa a dizer o que fazer, em vez de repetir um retry inútil. */}
+          {/401|invalid token|token inv/i.test(errorMsg) && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 12, padding: '10px 12px', background: 'var(--amber-dim)', border: '1px solid rgba(217,119,6,0.3)', borderRadius: 10 }}>
+              <strong style={{ color: 'var(--amber)' }}>Token da instância inválido.</strong><br />
+              A Uazapi está recusando o token configurado — nenhum envio, QR Code ou
+              sincronização vai funcionar até ele ser renovado. É preciso gerar um token
+              novo no painel da Uazapi e atualizar a variável <code>UAZAPI_TOKEN</code> no
+              Vercel. Falar com o Tiago (u4digital).
+            </div>
+          )}
           <button style={btn('primary')} onClick={fetchQr}>
             ↺ Tentar novamente
           </button>
@@ -884,7 +897,9 @@ export default function ConfigView() {
         <button style={tab(activeTab === 'corp')} onClick={() => setActiveTab('corp')}>Corp (Agia)</button>
         <button style={tab(activeTab === 'users')} onClick={() => setActiveTab('users')}>Usuários</button>
         <button style={tab(activeTab === 'funis')} onClick={() => setActiveTab('funis')}>Funis</button>
-        <button style={tab(activeTab === 'status')} onClick={() => setActiveTab('status')}>Status</button>
+        {/* S1 (PDF Campanha, p.3): aba Status removida da navegação — sem utilidade hoje.
+            O painel e a API continuam no código porque os cards ainda leem essas opções;
+            se o Marcel confirmar que ninguém usa, aí sim removemos schema e endpoint. */}
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>

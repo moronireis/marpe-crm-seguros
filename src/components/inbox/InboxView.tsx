@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import TemplateDropdown, { useTemplates, type Template } from '../shared/TemplateDropdown';
+import TemplateDropdown, { useTemplates, orderedTemplates, type Template } from '../shared/TemplateDropdown';
 import AudioPlayer from '../shared/AudioPlayer';
+import EmojiPicker from '../shared/EmojiPicker';
 import { maskPhone, validPhone, validEmail } from '../../lib/masks';
 import { interpolateVariables } from '../../lib/variables';
 
@@ -349,6 +350,10 @@ export default function InboxView() {
   const templates = useTemplates();
   const [showTemplates, setShowTemplates] = useState(false);
   const [templateFilter, setTemplateFilter] = useState('');
+  // S1 #7: índice destacado para navegar o "/" pelo teclado (setas + Enter)
+  const [templateIdx, setTemplateIdx] = useState(0);
+  // S1 #11: seletor de emojis
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const msgEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -792,6 +797,7 @@ export default function InboxView() {
     if (value.startsWith('/')) {
       setShowTemplates(true);
       setTemplateFilter(value.slice(1).toLowerCase());
+      setTemplateIdx(0); // S1 #7: cada nova filtragem volta o destaque para o topo
     } else {
       setShowTemplates(false);
       setTemplateFilter('');
@@ -806,6 +812,41 @@ export default function InboxView() {
     inputRef.current?.focus();
     requestAnimationFrame(resizeComposer);
   }
+
+  // S1 #7: botão do raio abre a mesma lista do "/"
+  function openQuickMessages() {
+    if (showTemplates) { setShowTemplates(false); return; }
+    setEmojiOpen(false);
+    if (!newMsg.startsWith('/')) setNewMsg('/');
+    setTemplateFilter('');
+    setTemplateIdx(0);
+    setShowTemplates(true);
+    inputRef.current?.focus();
+  }
+
+  // S1 #11: insere o emoji na posição do cursor (e não no fim do texto)
+  function insertEmoji(emoji: string) {
+    const el = inputRef.current;
+    if (!el) { setNewMsg(v => v + emoji); return; }
+    const start = el.selectionStart ?? newMsg.length;
+    const end = el.selectionEnd ?? newMsg.length;
+    const next = newMsg.slice(0, start) + emoji + newMsg.slice(end);
+    setNewMsg(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + emoji.length;
+      el.setSelectionRange(pos, pos);
+      resizeComposer();
+    });
+  }
+
+  // S1 #7: lista achatada na MESMA ordem em que o dropdown renderiza —
+  // é o que faz seta/Enter selecionarem exatamente o item destacado.
+  const templateOrder = useMemo(
+    () => (showTemplates ? orderedTemplates(templates, templateFilter) : []),
+    [showTemplates, templates, templateFilter]
+  );
+  const activeTemplate = templateOrder[Math.min(templateIdx, templateOrder.length - 1)] || null;
 
   const composerHasVars = /\{\{\w+\}\}/.test(newMsg);
 
@@ -1216,7 +1257,7 @@ export default function InboxView() {
 
           {/* Fix 7: groups and individual contacts both get the send area — barra flutuante de vidro */}
           <div className="glass-nav anim" style={{ ['--i' as any]: 3, borderRadius: 24, padding: '8px 8px 8px 18px', flexShrink: 0, position: 'relative' }}>
-              {/* Template picker popup */}
+              {/* Template picker popup — sobe de baixo, como no WhatsApp Web (S1 #7) */}
               <TemplateDropdown
                 visible={showTemplates}
                 filter={templateFilter}
@@ -1224,7 +1265,17 @@ export default function InboxView() {
                 onSelect={selectTemplate}
                 left={16}
                 right={16}
+                activeId={activeTemplate?.id || null}
+                onHover={t => {
+                  const i = templateOrder.findIndex(x => x.id === t.id);
+                  if (i >= 0) setTemplateIdx(i);
+                }}
+                previewOf={body => interpolateVariables(body, { contact: activeContact })}
               />
+              {/* S1 #11: seletor de emojis */}
+              {emojiOpen && (
+                <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />
+              )}
               {/* Preview de variáveis (item 5) — some quando o picker "/" está aberto */}
               {composerHasVars && !showTemplates && (
                 <div className="glass-modal fade-in" style={{ position: 'absolute', bottom: 'calc(100% + 10px)', left: 16, right: 16, zIndex: 40, borderRadius: 14, padding: '9px 13px', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -1317,6 +1368,16 @@ export default function InboxView() {
                   style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: attachMenuOpen ? 'var(--accent-dim)' : 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s var(--ease-out)' }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                 </button>
+                {/* Raio: mensagens rápidas — mesmo efeito de digitar "/" */}
+                <button onClick={openQuickMessages} disabled={sending || recording} title="Mensagens rápidas"
+                  style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: showTemplates ? 'var(--accent-dim)' : 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s var(--ease-out)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                </button>
+                {/* S1 #11: emojis no composer */}
+                <button onClick={() => setEmojiOpen(v => !v)} disabled={sending || recording} title="Emojis"
+                  style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--hairline)', background: emojiOpen ? 'var(--accent-dim)' : 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s var(--ease-out)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                </button>
                 {recording ? (
                   /* S3.2 (issue #1): gravação em andamento */
                   <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
@@ -1337,7 +1398,30 @@ export default function InboxView() {
                 ) : (
                 <textarea ref={inputRef} rows={1} value={newMsg} onChange={e => handleMsgChange(e.target.value)}
                   onKeyDown={e => {
-                    if (e.key === 'Escape') { setShowTemplates(false); return; }
+                    // S1 #7: navegação por teclado no "/" — setas escolhem, Enter confirma
+                    if (showTemplates && templateOrder.length > 0) {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setTemplateIdx(i => (i + 1) % templateOrder.length);
+                        return;
+                      }
+                      if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setTemplateIdx(i => (i - 1 + templateOrder.length) % templateOrder.length);
+                        return;
+                      }
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (activeTemplate) selectTemplate(activeTemplate);
+                        return;
+                      }
+                      if (e.key === 'Tab') {
+                        e.preventDefault();
+                        if (activeTemplate) selectTemplate(activeTemplate);
+                        return;
+                      }
+                    }
+                    if (e.key === 'Escape') { setShowTemplates(false); setEmojiOpen(false); return; }
                     if (e.key === 'Enter' && !e.shiftKey && !showTemplates) { e.preventDefault(); sendMessage(); }
                   }}
                   onPaste={e => {
