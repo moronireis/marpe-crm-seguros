@@ -307,10 +307,39 @@ function formatTime(iso: string): string {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
+type InboxTab = 'conversas' | 'grupos' | 'naolidas' | 'finalizadas';
+
+const TAB_LABELS: Record<InboxTab, string> = {
+  conversas: 'Conversas',
+  grupos: 'Grupos',
+  naolidas: 'Não lidas',
+  finalizadas: 'Finalizadas',
+};
+
+// S1 #15 (27/07): filtros do Inbox persistem entre telas e sessões — mesmo
+// padrão já usado no CRM. Antes eram reaplicados do zero a cada visita.
+const INBOX_PREFS_KEY = 'inbox_prefs_v1';
+
+function loadInboxPrefs(): { tab: InboxTab; tag: string } {
+  const fallback = { tab: 'conversas' as InboxTab, tag: '' };
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.localStorage.getItem(INBOX_PREFS_KEY);
+    if (!raw) return fallback;
+    const p = JSON.parse(raw);
+    const tab: InboxTab = ['conversas', 'grupos', 'naolidas', 'finalizadas'].includes(p?.tab) ? p.tab : 'conversas';
+    return { tab, tag: typeof p?.tag === 'string' ? p.tag : '' };
+  } catch {
+    return fallback;
+  }
+}
+
 export default function InboxView() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'conversas' | 'grupos'>('conversas');
+  // S1 #9: abas do funil de atendimento (a aba "Atendimento" do PDF depende do
+  // critério de entrada/saída que ainda precisa vir do Marcel — não inventamos aqui).
+  const [activeTab, setActiveTab] = useState<InboxTab>('conversas');
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
@@ -349,8 +378,10 @@ export default function InboxView() {
     setShowContactPanel(v => { localStorage.setItem('inbox_contact_panel', v ? '0' : '1'); return !v; });
   }
   // S3.5 (issue #3): filtro Não lidas + S3.8 (issue #4): filtro por etiqueta
-  const [onlyUnread, setOnlyUnread] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
+  // S1 #15: só grava as preferências depois de hidratar, senão o primeiro render
+  // (com os valores default) apagaria o que estava salvo.
+  const prefsReady = useRef(false);
   // S3.1-S3.3 (issues #1 #5 #7): anexos, gravação de áudio e colar imagem
   const [attachPreview, setAttachPreview] = useState<{ kind: 'image' | 'video' | 'document' | 'audio'; dataURI: string; mime: string; filename: string; caption: string } | null>(null);
   const [sendingMedia, setSendingMedia] = useState(false);
@@ -556,6 +587,22 @@ export default function InboxView() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
+  // S1 #15: restaura aba e etiqueta salvas (uma vez, no mount)
+  useEffect(() => {
+    const p = loadInboxPrefs();
+    setActiveTab(p.tab);
+    setTagFilter(p.tag);
+    prefsReady.current = true;
+  }, []);
+
+  // S1 #15: salva a cada mudança (depois de hidratado)
+  useEffect(() => {
+    if (!prefsReady.current) return;
+    try {
+      localStorage.setItem(INBOX_PREFS_KEY, JSON.stringify({ tab: activeTab, tag: tagFilter }));
+    } catch {}
+  }, [activeTab, tagFilter]);
+
   // Load contacts + poll every 10s to catch new contacts from WhatsApp
   useEffect(() => {
     const load = () => {
@@ -695,12 +742,27 @@ export default function InboxView() {
   const unreadCount = useMemo(() => contacts.reduce((n, c) => n + (isUnread(c) ? 1 : 0), 0), [contacts, isUnread]);
   const allTags = useMemo(() =>
     [...new Set(contacts.flatMap(c => c.tags || []))].sort(), [contacts]);
+
+  // S1 #9 (27/07): funil de atendimento em abas. "Finalizadas" resolve o apontamento
+  // de que finalizar marcava a conversa mas não a movia para lugar nenhum.
+  // As abas Conversas/Grupos buscam fontes diferentes na API; Não lidas e Finalizadas
+  // são recortes do conjunto de conversas individuais.
   const listContacts = useMemo(() => {
     let list = contacts;
-    if (onlyUnread) list = list.filter(isUnread);
+    if (activeTab === 'naolidas') list = list.filter(isUnread);
+    if (activeTab === 'finalizadas') list = list.filter(c => (c as any).conv_status === 'closed');
+    // fora da aba Finalizadas, conversa fechada sai da lista (é o "mover para outro lugar")
+    if (activeTab === 'conversas' || activeTab === 'naolidas') {
+      list = list.filter(c => (c as any).conv_status !== 'closed');
+    }
     if (tagFilter) list = list.filter(c => (c.tags || []).includes(tagFilter));
     return [...list].sort((a, b) => ((b as any).pinned ? 1 : 0) - ((a as any).pinned ? 1 : 0));
-  }, [contacts, onlyUnread, tagFilter, isUnread]);
+  }, [contacts, activeTab, tagFilter, isUnread]);
+
+  const closedCount = useMemo(
+    () => contacts.reduce((n, c) => n + ((c as any).conv_status === 'closed' ? 1 : 0), 0),
+    [contacts]
+  );
 
   // Populate editable fields when active contact changes
   // (activeContact?.id no deps: cobre o caso do contato pinado chegar depois via fetch)
@@ -869,36 +931,30 @@ export default function InboxView() {
           </div>
         </div>
 
-        {/* Tab bar */}
+        {/* S1 #9: funil de atendimento em abas — Conversas · Grupos · Não lidas · Finalizadas */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
-          {(['conversas', 'grupos'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{
-                flex: 1, padding: '10px 0', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                borderBottom: `2px solid ${activeTab === tab ? 'var(--accent)' : 'transparent'}`,
-                color: activeTab === tab ? 'var(--accent-light)' : 'var(--text-muted)',
-                transition: 'color 0.18s, border-color 0.18s',
-                letterSpacing: '0.03em',
-              }}>
-              {tab === 'conversas' ? 'Conversas' : 'Grupos'}
-            </button>
-          ))}
-          {/* S3.5 (issue #3): filtro Não lidas */}
-          <button onClick={() => setOnlyUnread(v => !v)}
-            style={{
-              flex: 1, padding: '10px 0', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              borderBottom: `2px solid ${onlyUnread ? 'var(--accent)' : 'transparent'}`,
-              color: onlyUnread ? 'var(--accent-light)' : 'var(--text-muted)',
-              transition: 'color 0.18s, border-color 0.18s', letterSpacing: '0.03em',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-            }}>
-            Não lidas
-            {unreadCount > 0 && (
-              <span style={{ fontSize: 9.5, fontWeight: 700, background: 'var(--accent)', color: '#fff', borderRadius: 999, padding: '1px 6px', lineHeight: 1.5 }}>{unreadCount}</span>
-            )}
-          </button>
+          {(['conversas', 'grupos', 'naolidas', 'finalizadas'] as const).map(tab => {
+            const badge = tab === 'naolidas' ? unreadCount : tab === 'finalizadas' ? closedCount : 0;
+            const on = activeTab === tab;
+            return (
+              <button key={tab} onClick={() => setActiveTab(tab)} title={TAB_LABELS[tab]}
+                style={{
+                  flex: 1, minWidth: 0, padding: '10px 2px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  borderBottom: `2px solid ${on ? 'var(--accent)' : 'transparent'}`,
+                  color: on ? 'var(--accent-light)' : 'var(--text-muted)',
+                  transition: 'color 0.18s, border-color 0.18s',
+                  letterSpacing: '0.02em',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                  whiteSpace: 'nowrap',
+                }}>
+                {TAB_LABELS[tab]}
+                {badge > 0 && (
+                  <span style={{ fontSize: 9, fontWeight: 700, background: on ? 'var(--accent)' : 'var(--field-bg)', color: on ? '#fff' : 'var(--text-muted)', borderRadius: 999, padding: '1px 5px', lineHeight: 1.5 }}>{badge}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--hairline)' }}>
@@ -932,7 +988,10 @@ export default function InboxView() {
             </div>
           ) : listContacts.length === 0 ? (
             <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
-              {onlyUnread ? 'Nenhuma conversa não lida' : activeTab === 'grupos' ? 'Nenhum grupo encontrado' : 'Nenhum contato encontrado'}
+              {activeTab === 'naolidas' ? 'Nenhuma conversa não lida'
+                : activeTab === 'finalizadas' ? 'Nenhuma conversa finalizada'
+                : activeTab === 'grupos' ? 'Nenhum grupo encontrado'
+                : 'Nenhum contato encontrado'}
             </div>
           ) : listContacts.map(c => {
             const isGroup = (c as any).source === 'whatsapp_group';
