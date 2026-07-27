@@ -1,5 +1,47 @@
 # Plano — Atualizações 27/07 (4 PDFs "marpe att novas")
 
+## 🔴 URGENTE — achado de 27/07 durante a execução (antes de qualquer sprint)
+
+Ao verificar o item #4 do PDF do Inbox ("a função Sincronizar está funcionando?"), a produção
+apareceu em dois problemas graves. Ambos foram medidos contra o ambiente real
+(`vercel env pull --environment=production`), não contra o `.env` local:
+
+**1. Token da UazapiGO inválido.** `GET /instance/status?token=…` responde
+`{"code":401,"message":"Invalid token."}`. Com o token no header errado a resposta muda para
+`"Missing token"` — ou seja, o esquema de autenticação está certo e o **valor do token está morto**.
+Enquanto isso durar: não envia mensagem, não gera QR, não sincroniza foto e o proxy de mídia não
+baixa anexo (o que provavelmente também explica parte dos "expirado" relatados). É exatamente o
+erro 401 da captura do PDF de Sincronização (§8).
+
+**2. Histórico de conversas ZERADO.** No Supabase de produção:
+
+| Tabela | Registros |
+|---|---|
+| `marpe_messages` | **0** |
+| `marpe_whatsapp_sessions` | **0** |
+| `marpe_contacts` origem `whatsapp` / `whatsapp_group` | **0** |
+| `marpe_contacts` (corp_sync + manual) | 2.793 — intactos |
+| `marpe_deals` | 4.833 — intactos |
+
+O padrão bate exatamente com o fluxo documentado do botão **"Desconectar WhatsApp"**, que avisa
+"isso vai limpar todas as mensagens e contatos do WhatsApp". As capturas do PDF (que mostram
+"155 mensagens no histórico") são anteriores a isso. O CRM em si — negócios, contatos do Corp,
+funis — está intacto.
+
+**Ações, nesta ordem:**
+1. **Tiago**: gerar token novo no painel da Uazapi e atualizar `UAZAPI_TOKEN` no Vercel. Sem isso o
+   Inbox não volta e os sprints S1/S2 não podem ser validados na tela.
+2. **Tiago/Cloudfy**: verificar com urgência se o Supabase tem PITR/backup do período — a janela de
+   retenção costuma ser curta. É a única chance de recuperar o histórico.
+3. Reconectar via QR e confirmar que o webhook volta a gravar.
+4. Combinar com o Marcel que ninguém mais use "Desconectar" (é o botão que apaga tudo).
+
+**Já mitigado nesta sessão:** `scripts/backup-db.mjs` passou a incluir `marpe_messages`,
+`marpe_contacts` e `marpe_whatsapp_sessions` — antes o backup só cobria as tabelas de negócio, então
+o histórico de conversa não estava salvo em lugar nenhum.
+
+---
+
 > Fonte: 4 PDFs entregues 27/07 · Inbox (15 correções + 4 melhorias) · Sincronização Corp×CRM (10 módulos) · Campanha/Templates · API Corp (contexto e-mail Agger)
 > Cruzado com o estado real do CRM pós-entrega de 22-23/07 (RELATORIO-BOARD-2207.md)
 
@@ -79,7 +121,32 @@ conferido com GET no fim: 404 nos dois). Nenhum registro real da Marpe foi alter
 ### ~~S0 — Probes na CorpAPI + e-mail consolidado (0,5 sessão)~~ ✅ CONCLUÍDO 27/07
 Resultado acima. Entregáveis: `scripts/probe-corp-s0.mjs` (reexecutável) e `SOLICITACAO-AGIA-API.md` v2 (itens 8-11 novos, prontos para o Tiago enviar).
 
-### S1 — Inbox: correções e WhatsApp Web feel (1,5 sessão)
+### ✅ S1 — Inbox: correções e WhatsApp Web feel — ENTREGUE 27/07 (falta validar na tela)
+
+Commits `397f2f6`, `7f35cb8`, `f2166bd`. Pendente de validação visual porque o Inbox está sem
+dados e sem token (ver o bloco urgente no topo).
+
+| Item do PDF | O que era | Estado |
+|---|---|---|
+| #1 / #2 barra no topo | Era a barra de rolagem **horizontal**: URL longa esticava a bolha | ✅ `overflowX:hidden` + quebra de palavra, nas 2 telas |
+| #1 (bônus) | Botão "Carregar anteriores" no topo | ✅ virou scroll infinito, nas 2 telas |
+| #3 barra branca no áudio | `<audio controls>` nativo na aba Conversas do card | ✅ player único compartilhado; + waveform ficava invisível no tema claro (canvas não herda cor) → tokens `--wave-*` |
+| #5 links não clicáveis | Meet/Teams vinham como texto morto | ✅ linkify com pontuação final fora do link |
+| #7 "/" mensagens rápidas | Sem teclado e sem preview | ✅ ↑↓/Enter/Tab/Esc + **preview com variáveis resolvidas** + botão de raio |
+| #8 formatação | `*negrito*` etc. | já existia (S3.9) |
+| #8 vídeo expirado indevido | `<source type>` recusava mime divergente | ✅ src direto + só marca expirado se o media element registrar erro |
+| #9 aba Finalizadas | Finalizava mas não movia | ✅ funil Conversas · Grupos · Não lidas · Finalizadas |
+| #10 grupos empilhados | Webhook gravava todo grupo como `inbound` | ✅ respeita `fromMe` (só vale para mensagens novas) |
+| #11 emojis | Não existia | ✅ picker próprio, busca PT, recentes |
+| #12 um áudio por vez | Tocavam juntos | ✅ controlador único de players |
+| #15 persistir filtros | Reaplicava tudo a cada visita | ✅ `localStorage` (aba + etiqueta) |
+| Config > Status | Remover aba | ✅ fora da navegação (painel/API mantidos — cards ainda leem) |
+| Config > WhatsApp 401 | Erro cru | ✅ mensagem explicando token + o que fazer |
+| #4 "Sincronizar" funciona? | — | ⚠️ **não dá para responder** com o token inválido; volta assim que renovar |
+| #6 contatos sumidos | — | ⚠️ **explicado pelo incidente**: os contatos de origem WhatsApp foram apagados |
+| aba "Atendimento" | — | ⏸ falta o critério de entrada/saída (decisão 1 abaixo) |
+
+### ~~S1 — Inbox: correções e WhatsApp Web feel (1,5 sessão)~~ — escopo original
 1. (#1/#2) Remover barra/contagem no topo da conversa → scroll infinito para cima (substitui o botão "Carregar anteriores")
 2. (#3) Player de áudio estilizado (sem barra branca do `<audio>` nativo)
 3. (#5) Links clicáveis nas mensagens (linkify http/https)

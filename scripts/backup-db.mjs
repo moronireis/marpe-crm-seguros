@@ -31,6 +31,12 @@ const TABLES = [
   ['marpe_deal_documents', 'id'],
   ['marpe_installments', 'id'],
   ['marpe_settings', 'key'],
+  // 27/07: incluídas depois de constatar que a produção estava com marpe_messages
+  // ZERADA. O "Desconectar WhatsApp" apaga mensagens, sessões e contatos de origem
+  // WhatsApp — e o histórico de conversa não estava em backup nenhum.
+  ['marpe_messages', 'id'],
+  ['marpe_contacts', 'id'],
+  ['marpe_whatsapp_sessions', 'id'],
 ];
 
 const manifest = { created_at: new Date().toISOString(), tables: {} };
