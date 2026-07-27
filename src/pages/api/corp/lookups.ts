@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
-import { listRamos, listSeguradoras, listProdutores, listAgentes, listProfissoes } from '../../../lib/corp/client';
+import { listRamos, listSeguradoras, listProdutores, listAgentes, listProfissoes, listEstadosCivis, listEscolaridades } from '../../../lib/corp/client';
 
 export const prerender = false;
 
@@ -22,12 +22,15 @@ export const GET: APIRoute = async ({ locals }) => {
   }
 
   const sb = createServerClient();
-  const [ramos, seguradoras, produtores, agentes, profissoes, campanhasQ, codcampQ, baseQ] = await Promise.allSettled([
+  const [ramos, seguradoras, produtores, agentes, profissoes, estadosCivis, escolaridades, campanhasQ, codcampQ, baseQ] = await Promise.allSettled([
     listRamos(),
     listSeguradoras(),
     listProdutores(),
     listAgentes(),
     listProfissoes(),
+    // S0 27/07: existem na API, fora da doc — "Informações adicionais" do PDF Sync §1
+    listEstadosCivis(),
+    listEscolaridades(),
     sb.from('marpe_deals').select('campanha').not('campanha', 'is', null).limit(2000),
     // A CorpAPI não expõe /campanhas nem o NOME no detail (só codcamp) — os
     // códigos vêm dos negócios sincronizados; o dual-write devolve o codcamp
@@ -56,6 +59,8 @@ export const GET: APIRoute = async ({ locals }) => {
     produtores: ok(produtores, [] as Awaited<ReturnType<typeof listProdutores>>),
     agentes: ok(agentes, [] as Awaited<ReturnType<typeof listAgentes>>),
     profissoes: ok(profissoes, [] as Awaited<ReturnType<typeof listProfissoes>>),
+    estados_civis: ok(estadosCivis, [] as Awaited<ReturnType<typeof listEstadosCivis>>),
+    escolaridades: ok(escolaridades, [] as Awaited<ReturnType<typeof listEscolaridades>>),
     campanhas,
     campanhas_cod,
     bases_repasse,

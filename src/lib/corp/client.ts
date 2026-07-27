@@ -231,6 +231,42 @@ export async function listProfissoes(): Promise<CorpProfissao[]> {
   return data.profissoes || [];
 }
 
+// ===== ESTADO CIVIL / ESCOLARIDADE =====
+// Descobertos no probe S0 de 27/07 — existem na API mas NÃO estão na doc oficial
+// do Postman. Atendem "Informações adicionais" do PDF de Sincronização (§1).
+
+export interface CorpLookupSimples { codigo: number; descricao: string }
+
+export async function listEstadosCivis(): Promise<CorpLookupSimples[]> {
+  const data = await corpFetch<{ header?: { count: number }; estados_civis: CorpLookupSimples[] }>('/estado_civil', {
+    codfil: String(CODFIL),
+  });
+  return data.estados_civis || [];
+}
+
+export async function listEscolaridades(): Promise<CorpLookupSimples[]> {
+  const data = await corpFetch<{ header?: { count: number }; escolaridades: CorpLookupSimples[] }>('/escolaridade', {
+    codfil: String(CODFIL),
+  });
+  return data.escolaridades || [];
+}
+
+// ===== DEDUPE POR CPF/CNPJ =====
+// GET /busca_cpf responde 404 "Nenhum cliente encontrado." quando não existe —
+// tratado aqui como "livre para cadastrar", não como erro.
+
+export async function buscaPorCpfCnpj(cpfCnpj: string): Promise<any[] | null> {
+  try {
+    const data = await corpFetch<any>('/busca_cpf', { cpf_cnpj: cpfCnpj });
+    const list = data?.clientes || data?.cliente || [];
+    return Array.isArray(list) ? list : [list].filter(Boolean);
+  } catch (e) {
+    const msg = String(e).toLowerCase();
+    if (msg.includes('404') || msg.includes('nenhum')) return [];
+    return null; // null = não deu para consultar (não bloqueia o cadastro)
+  }
+}
+
 // ===== WRITE OPERATIONS =====
 // Payload shapes discovered 2026-07-08 via disposable-record tests (POST → GET → DELETE).
 // The validator rejects unknown fields, so only send keys listed here.
@@ -255,6 +291,10 @@ async function corpWrite<T>(path: string, method: 'POST' | 'PUT' | 'PATCH' | 'DE
 export async function createCliente(data: {
   nome: string; pessoa?: 'F' | 'J'; cpf_cnpj?: string; datanas?: string; sexo?: string;
 }): Promise<number> {
+  // ATENÇÃO (probe 27/07): o POST aceita SÓ estes campos. Mandar estado_civil ou
+  // escolaridade aqui devolve 500, mesmo eles aparecendo no exemplo da doc oficial.
+  // O caminho que funciona é criar e depois aplicar `updateCliente` — ver
+  // `createClienteCompleto`.
   const body: Record<string, any> = { nome: data.nome };
   if (data.pessoa) body.pessoa = data.pessoa;
   if (data.cpf_cnpj) body.cpf_cnpj = data.cpf_cnpj;
@@ -262,6 +302,45 @@ export async function createCliente(data: {
   if (data.sexo) body.sexo = data.sexo;
   const res = await corpWrite<{ codigo: number }>('/cliente', 'POST', body);
   return res.codigo;
+}
+
+/**
+ * Cria o cliente e, se houver "informações adicionais" (PDF Sync §1), aplica-as
+ * num PATCH logo em seguida — que é o único caminho que o Corp aceita.
+ * O PATCH falhando não invalida o cadastro: devolve o aviso e o cliente existe.
+ */
+export async function createClienteCompleto(data: {
+  nome: string; pessoa?: 'F' | 'J'; cpf_cnpj?: string; datanas?: string; sexo?: string;
+  estado_civil?: number | null; escolaridade?: number | null; profissao?: number | null;
+}): Promise<{ codigo: number; warning?: string }> {
+  const codigo = await createCliente(data);
+
+  const extras: Record<string, any> = {};
+  if (data.estado_civil) extras.estado_civil = data.estado_civil;
+  if (data.escolaridade) extras.escolaridade = data.escolaridade;
+  if (data.profissao) extras.profissao = data.profissao;
+  if (Object.keys(extras).length === 0) return { codigo };
+
+  try {
+    await updateCliente(codigo, extras);
+    return { codigo };
+  } catch (e: any) {
+    return { codigo, warning: `Cliente criado, mas estado civil/escolaridade não foram gravados no Corp: ${e.message}` };
+  }
+}
+
+/**
+ * PATCH /cliente — edição bidirecional CRM → Corp (S4, validado no probe de 27/07).
+ * O identificador vai NO CORPO (`codfil` + `codigo`); na query string o Corp
+ * responde 400 "Codfil ou código de cliente inválidos.".
+ * É patch parcial: só mande os campos que mudaram.
+ */
+export async function updateCliente(codigo: number, fields: Record<string, any>): Promise<void> {
+  const body: Record<string, any> = { codfil: CODFIL, codigo };
+  for (const [k, v] of Object.entries(fields)) {
+    if (v !== undefined) body[k] = v;
+  }
+  await corpWrite('/cliente', 'PATCH', body);
 }
 
 export async function deleteCliente(codigo: number): Promise<void> {

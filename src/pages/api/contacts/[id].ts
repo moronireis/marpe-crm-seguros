@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
 import { validPhone, validEmail } from '../../../lib/masks';
+import { updateCliente } from '../../../lib/corp/client';
 
 export const prerender = false;
 
@@ -84,7 +85,9 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
   const allowed = ['name', 'phone', 'phone_secondary', 'email', 'city', 'state',
     'address', 'birth_date', 'profession', 'marital_status', 'tags', 'notes', 'responsible_id',
     // Sprint S3 (checkpoint 15/07): leitura, favorito e status da conversa
-    'inbox_read_at', 'pinned', 'conv_status'];
+    'inbox_read_at', 'pinned', 'conv_status',
+    // S3 (27/07): campos do cadastro PF/PJ
+    'escolaridade', 'cnh_vencimento', 'contato_empresa'];
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const key of allowed) {
@@ -100,5 +103,30 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
     .single();
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  return new Response(JSON.stringify({ contact: data }), { status: 200 });
+
+  // S4.1 (27/07) — bidirecional CRM → Corp. O PDF de Sincronização pede que a
+  // edição reflita nos dois sistemas; o probe validou o PATCH /cliente (com o
+  // identificador NO CORPO). Só os campos que o Corp realmente aceita.
+  //
+  // Falha aqui NÃO derruba a resposta: o dado já está salvo no CRM e o próximo
+  // sync reconcilia. Devolvemos como aviso para a tela poder mostrar.
+  const warnings: string[] = [];
+  const corpCodigo = parseInt(String(data?.corp_id || '').match(/(\d+)$/)?.[1] || '', 10);
+  if (corpCodigo) {
+    const corpFields: Record<string, any> = {};
+    if ('name' in body) corpFields.nome = body.name;
+    if ('birth_date' in body) corpFields.datanas = body.birth_date;
+    if ('marital_status' in body && body.marital_status) corpFields.estado_civil = Number(body.marital_status);
+    if ('escolaridade' in body && body.escolaridade) corpFields.escolaridade = Number(body.escolaridade);
+
+    if (Object.keys(corpFields).length > 0) {
+      try {
+        await updateCliente(corpCodigo, corpFields);
+      } catch (e: any) {
+        warnings.push(`Alteração salva no CRM, mas o Corp recusou: ${e.message}`);
+      }
+    }
+  }
+
+  return new Response(JSON.stringify({ contact: data, warnings }), { status: 200 });
 };

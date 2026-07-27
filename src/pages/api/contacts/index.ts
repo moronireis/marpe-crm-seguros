@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
 import { validPhone, validEmail } from '../../../lib/masks';
-import { createCliente, createTelefone, createEndereco, createEmail, deleteCliente } from '../../../lib/corp/client';
+import { createCliente, createClienteCompleto, createTelefone, createEndereco, createEmail, deleteCliente } from '../../../lib/corp/client';
 
 export const prerender = false;
 
@@ -114,13 +114,19 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   if (body.corp) {
     try {
-      corpCodigo = await createCliente({
+      // S3 (27/07): estado civil e escolaridade NÃO passam no POST (500) — vão num
+      // PATCH logo depois, que é o que o Corp aceita. Ver createClienteCompleto.
+      const created = await createClienteCompleto({
         nome: body.name,
         pessoa: body.pessoa === 'J' ? 'J' : 'F',
         cpf_cnpj: body.cpf_cnpj || undefined,
         datanas: body.birth_date || undefined,
         sexo: body.sexo || undefined,
+        estado_civil: body.estado_civil ?? undefined,
+        escolaridade: body.escolaridade ?? undefined,
       });
+      corpCodigo = created.codigo;
+      if (created.warning) warnings.push(created.warning);
       corpId = String(corpCodigo);
     } catch (e: any) {
       return new Response(JSON.stringify({ error: `Corp não aceitou o cadastro: ${e.message}` }), { status: 502 });
@@ -173,6 +179,12 @@ export const POST: APIRoute = async ({ locals, request }) => {
       cpf_cnpj: body.cpf_cnpj || null,
       birth_date: body.birth_date || null,
       profession: body.profession || null,
+      // S3 (27/07): estado civil reaproveita marital_status (coluna que já existia);
+      // escolaridade/CNH/contato na empresa vieram na migração 20260727.
+      marital_status: body.estado_civil ? String(body.estado_civil) : null,
+      escolaridade: body.escolaridade ?? null,
+      cnh_vencimento: body.cnh_vencimento || null,
+      contato_empresa: body.contato_empresa || null,
       address,
       city: body.city || null,
       state: body.state || null,
