@@ -591,28 +591,39 @@ export default function TemplatesView() {
           /* Editor */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-            {/* Editor header */}
+            {/* Editor header — S5 (PDF Campanha, p.2): "o campo nome do template
+                precisa estar mais em destaque, ele está apagado e passa despercebido".
+                Deixou de ser um input transparente sem moldura: ganhou rótulo,
+                caixa com fundo e foco marcado. */}
             <div style={{
-              height: 56,
+              minHeight: 56,
               borderBottom: '1px solid var(--border)',
               display: 'flex',
               alignItems: 'center',
-              padding: '0 24px',
+              padding: '10px 24px',
               gap: 12,
               flexShrink: 0,
             }}>
+              <label style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', flexShrink: 0 }}>
+                Nome
+              </label>
               <input
                 style={{
                   flex: 1,
-                  background: 'transparent',
-                  border: 'none',
+                  background: 'var(--field-bg)',
+                  border: '1px solid var(--hairline)',
+                  borderRadius: 10,
+                  padding: '8px 12px',
                   outline: 'none',
                   fontSize: 16,
-                  fontWeight: 600,
+                  fontWeight: 700,
                   color: 'var(--text-primary)',
                   fontFamily: 'inherit',
                   minWidth: 0,
+                  transition: 'border-color 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out)',
                 }}
+                onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-dim)'; }}
+                onBlur={e => { e.currentTarget.style.borderColor = 'var(--hairline)'; e.currentTarget.style.boxShadow = 'none'; }}
                 placeholder="Nome do template..."
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}

@@ -1,5 +1,5 @@
 import { createServerClient } from '../supabase-server';
-import { getInstanceToken } from './instance';
+import { getInstanceToken, uazapiUrl } from './instance';
 
 export interface SendResult {
   ok: boolean;
@@ -82,6 +82,108 @@ export async function sendWhatsAppText(
       });
     }
 
+    return { ok: true, messageid: data.messageid };
+  } catch (e: any) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * Envio de MÍDIA (S5, 27/07 — PDF Campanha: "mensagem com foto, vídeo e link").
+ * Payload validado no projeto: POST /send/media
+ *   { number, type: image|video|document|myaudio, file: dataURI, text?, docName? }
+ * `myaudio` transcodifica para voz (PTT).
+ */
+export async function sendWhatsAppMedia(
+  phone: string,
+  media: { type: 'image' | 'video' | 'document' | 'myaudio'; dataUri: string; caption?: string; filename?: string },
+  contactId?: string
+): Promise<SendResult> {
+  const UAZAPI_URL = uazapiUrl();
+  const UAZAPI_TOKEN = await getInstanceToken();
+  if (!UAZAPI_TOKEN) return { ok: false, error: 'WhatsApp not configured' };
+
+  const isGroupJid = phone.endsWith('@g.us');
+  const number = isGroupJid ? phone : normalizePhone(phone);
+
+  try {
+    const res = await fetch(`${UAZAPI_URL}/send/media`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', token: UAZAPI_TOKEN },
+      body: JSON.stringify({
+        number,
+        type: media.type,
+        file: media.dataUri,
+        ...(media.caption ? { text: media.caption } : {}),
+        ...(media.type === 'document' && media.filename ? { docName: media.filename } : {}),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.message || data.error || `HTTP ${res.status}` };
+
+    if (contactId) {
+      const sb = createServerClient();
+      const contentType = media.type === 'myaudio' ? 'audio' : media.type;
+      await sb.from('marpe_messages').insert({
+        contact_id: contactId,
+        wa_message_id: data.messageid || null,
+        direction: 'outbound',
+        content_type: contentType,
+        body: media.caption || null,
+        status: 'sent',
+      });
+    }
+    return { ok: true, messageid: data.messageid };
+  } catch (e: any) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * Envio de CARROSSEL até 5 fotos (S5 — PDF Campanha).
+ * A rota existe nesta instância (probe 27/07: POST /send/carousel devolve
+ * 400 "Missing required fields" com corpo vazio, ou seja, existe e valida).
+ * Cada card leva imagem + texto próprios; `text` é a legenda geral.
+ */
+export async function sendWhatsAppCarousel(
+  phone: string,
+  carousel: { text?: string; cards: Array<{ image: string; text?: string }> },
+  contactId?: string
+): Promise<SendResult> {
+  const UAZAPI_URL = uazapiUrl();
+  const UAZAPI_TOKEN = await getInstanceToken();
+  if (!UAZAPI_TOKEN) return { ok: false, error: 'WhatsApp not configured' };
+  if (!carousel.cards?.length) return { ok: false, error: 'Carrossel sem imagens' };
+  if (carousel.cards.length > 5) return { ok: false, error: 'Carrossel aceita no máximo 5 fotos' };
+
+  const isGroupJid = phone.endsWith('@g.us');
+  const number = isGroupJid ? phone : normalizePhone(phone);
+
+  try {
+    const res = await fetch(`${UAZAPI_URL}/send/carousel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', token: UAZAPI_TOKEN },
+      body: JSON.stringify({
+        number,
+        text: carousel.text || '',
+        carousel: carousel.cards.map(c => ({ image: c.image, text: c.text || '' })),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.message || data.error || `HTTP ${res.status}` };
+
+    if (contactId) {
+      const sb = createServerClient();
+      await sb.from('marpe_messages').insert({
+        contact_id: contactId,
+        wa_message_id: data.messageid || null,
+        direction: 'outbound',
+        content_type: 'image',
+        body: carousel.text || `[carrossel: ${carousel.cards.length} fotos]`,
+        status: 'sent',
+        metadata: { carousel_cards: carousel.cards.length },
+      });
+    }
     return { ok: true, messageid: data.messageid };
   } catch (e: any) {
     return { ok: false, error: e.message };
