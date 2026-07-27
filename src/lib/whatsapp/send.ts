@@ -1,4 +1,5 @@
 import { createServerClient } from '../supabase-server';
+import { getInstanceToken } from './instance';
 
 export interface SendResult {
   ok: boolean;
@@ -43,7 +44,7 @@ export async function sendWhatsAppText(
   opts?: { isAutomation?: boolean; automationId?: string }
 ): Promise<SendResult> {
   const UAZAPI_URL = import.meta.env.UAZAPI_URL;
-  const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN;
+  const UAZAPI_TOKEN = await getInstanceToken();
 
   if (!UAZAPI_URL || !UAZAPI_TOKEN) {
     return { ok: false, error: 'WhatsApp not configured' };

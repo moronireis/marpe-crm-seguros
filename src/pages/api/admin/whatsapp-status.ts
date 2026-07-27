@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
+import { getInstance } from '../../../lib/whatsapp/instance';
 
 export const prerender = false;
 
@@ -8,7 +9,7 @@ export const GET: APIRoute = async ({ locals }) => {
   if (profile instanceof Response) return profile;
 
   const UAZAPI_URL = import.meta.env.UAZAPI_URL;
-  const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN;
+  const { token: UAZAPI_TOKEN } = await getInstance();
 
   if (!UAZAPI_URL || !UAZAPI_TOKEN) {
     return new Response(JSON.stringify({ connected: false, error: 'Not configured' }), { status: 200 });
@@ -21,7 +22,18 @@ export const GET: APIRoute = async ({ locals }) => {
     });
 
     if (!res.ok) {
-      return new Response(JSON.stringify({ connected: false, status: 'error', http: res.status }), { status: 200 });
+      // 27/07: separar "token recusado" de "instância fora do ar". Sem isso a tela
+      // só dizia "desconectado" e o caminho era gerar QR — que nunca ia funcionar,
+      // porque o QR usa o mesmo token recusado.
+      const tokenRejected = res.status === 401;
+      return new Response(JSON.stringify({
+        connected: false,
+        status: tokenRejected ? 'invalid_token' : 'error',
+        http: res.status,
+        error: tokenRejected
+          ? 'Token da instância recusado pela Uazapi (401). É preciso apontar o CRM para uma instância válida.'
+          : undefined,
+      }), { status: 200 });
     }
 
     const data = await res.json().catch(() => ({}));

@@ -1,13 +1,12 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
+import { getInstance } from '../../../lib/whatsapp/instance';
 
 export const prerender = false;
 
-const uazapi = () => ({
-  url: import.meta.env.UAZAPI_URL || '',
-  token: import.meta.env.UAZAPI_TOKEN || '',
-});
+// 27/07: url/token saem do resolvedor (marpe_settings → env), para o token poder
+// ser trocado pela tela de Configurações sem deploy.
 
 // GET — fetch QR code
 // UazapiGO flow: POST /instance/connect starts connecting and returns qrcode in response.
@@ -17,7 +16,7 @@ export const GET: APIRoute = async ({ locals }) => {
   const profile = requireAuth(locals);
   if (profile instanceof Response) return profile;
 
-  const { url, token } = uazapi();
+  const { url, token } = await getInstance();
   if (!url || !token) {
     return json({ error: 'WhatsApp not configured' }, 503);
   }
@@ -86,7 +85,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const profile = requireAuth(locals);
   if (profile instanceof Response) return profile;
 
-  const { url, token } = uazapi();
+  const { url, token } = await getInstance();
   if (!url || !token) {
     return json({ error: 'WhatsApp not configured' }, 503);
   }

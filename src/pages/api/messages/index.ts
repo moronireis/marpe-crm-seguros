@@ -3,6 +3,7 @@ import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
 import { interpolateVariables } from '../../../lib/variables';
 import { normalizePhone } from '../../../lib/whatsapp/send';
+import { getInstanceToken } from '../../../lib/whatsapp/instance';
 
 export const prerender = false;
 
@@ -84,7 +85,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   });
 
   const UAZAPI_URL = import.meta.env.UAZAPI_URL || 'https://u4digital.uazapi.com';
-  const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN || '';
+  const UAZAPI_TOKEN = await getInstanceToken();
 
   // Group JIDs (ending in @g.us) must be sent as-is to UazapiGO.
   // Individual numbers go through normalizePhone to ensure correct country-code format.

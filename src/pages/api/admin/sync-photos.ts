@@ -1,15 +1,19 @@
 import type { APIRoute } from 'astro';
 import { requireAdmin } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
+import { getInstanceToken } from '../../../lib/whatsapp/instance';
 
 export const prerender = false;
 
 const UAZAPI_URL = import.meta.env.UAZAPI_URL || '';
-const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN || '';
 
 // Attempt to fetch a profile picture URL from UazapiGO for a given phone number.
 // Tries multiple endpoint patterns — UazapiGO versions differ.
+// 27/07: o token é resolvido DENTRO da função — no topo do módulo viraria um
+// top-level await, resolvido uma vez por lambda, e uma troca de token só valeria
+// depois que o lambda reciclasse.
 async function fetchProfilePic(phone: string): Promise<string | null> {
+  const UAZAPI_TOKEN = await getInstanceToken();
   const endpoints = [
     // Pattern 1: POST /contacts/profile-picture
     async () => {

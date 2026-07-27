@@ -4,6 +4,7 @@ import { createHmac, createDecipheriv } from 'crypto';
 import { createServerClient } from '../../../lib/supabase-server';
 import { sendWhatsAppText } from '../../../lib/whatsapp/send';
 import { interpolateVariables } from '../../../lib/variables';
+import { getInstanceToken } from '../../../lib/whatsapp/instance';
 
 // ── WhatsApp media decryption ─────────────────────────────────────────────────
 // WhatsApp encrypts ALL media with AES-256-CBC before uploading to CDN.
@@ -379,7 +380,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   // ── Media storage ────────────────────────────────────────────────────────────
   const UAZAPI_URL = import.meta.env.UAZAPI_URL || 'https://u4digital.uazapi.com';
-  const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN || '';
+  const UAZAPI_TOKEN = await getInstanceToken();
 
   function extFromMime(m: string | null, ct: string): string {
     const t = (m || ct).toLowerCase();

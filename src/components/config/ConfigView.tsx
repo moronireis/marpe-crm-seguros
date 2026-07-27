@@ -387,6 +387,114 @@ function FunnelsTab() {
 
 // ─── WhatsApp QR Connection Panel ───────────────────────────────────────────
 
+/**
+ * Recuperação da instância WhatsApp (27/07).
+ *
+ * Quando a Uazapi recusa o token (401), não há QR que resolva: a instância
+ * precisa ser trocada. Antes isso exigia mexer na env do Vercel e redeployar —
+ * ou seja, ninguém da corretora conseguia reconectar sozinho. Aqui o admin
+ * resolve pela tela, dos dois jeitos possíveis:
+ *   1. colar o token de uma instância criada no painel da Uazapi (sempre funciona)
+ *   2. criar uma instância nova daqui (depende de UAZAPI_ADMIN_TOKEN configurado)
+ * Depois é só gerar o QR normalmente.
+ */
+function InstanceRecovery({ onDone }: { onDone: () => void }) {
+  const [mode, setMode] = useState<'token' | 'create'>('token');
+  const [token, setToken] = useState('');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+
+  async function submit() {
+    setBusy(true); setErr(''); setOk('');
+    try {
+      const res = await fetch('/api/admin/whatsapp-instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mode === 'token'
+          ? { mode: 'token', token: token.trim(), name: name.trim() || undefined }
+          : { mode: 'create', name: name.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) { setErr(d.error || 'Falha ao configurar a instância'); return; }
+      setOk(d.next || 'Instância configurada.');
+      setToken('');
+      setTimeout(onDone, 1200);
+    } catch (e: any) {
+      setErr(e?.message || 'Erro de rede');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field: React.CSSProperties = {
+    width: '100%', padding: '8px 11px', background: 'var(--field-bg)',
+    border: '1px solid var(--hairline)', borderRadius: 9, color: 'var(--text-primary)',
+    fontSize: 12.5, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+  };
+  const tabBtn = (on: boolean): React.CSSProperties => ({
+    flex: 1, padding: '7px 0', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+    cursor: 'pointer', borderRadius: 8,
+    background: on ? 'var(--accent-dim)' : 'transparent',
+    border: `1px solid ${on ? 'rgba(59,130,246,0.4)' : 'var(--hairline)'}`,
+    color: on ? 'var(--accent-light)' : 'var(--text-muted)',
+  });
+
+  return (
+    <div style={{ marginBottom: 12, padding: '12px 14px', background: 'var(--amber-dim)', border: '1px solid rgba(217,119,6,0.3)', borderRadius: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 10 }}>
+        <strong style={{ color: 'var(--amber)' }}>A Uazapi recusou o token desta instância.</strong><br />
+        Isso acontece quando o token é revogado ou o servidor rotaciona as credenciais.
+        Gerar QR de novo não resolve — é preciso apontar o CRM para uma instância válida.
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <button style={tabBtn(mode === 'token')} onClick={() => { setMode('token'); setErr(''); }}>Colar token existente</button>
+        <button style={tabBtn(mode === 'create')} onClick={() => { setMode('create'); setErr(''); }}>Criar instância nova</button>
+      </div>
+
+      {mode === 'token' ? (
+        <>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.5 }}>
+            No painel da Uazapi, abra a instância da Marpe e copie o <strong>Token</strong>.
+            Ele é validado aqui antes de ser salvo.
+          </div>
+          <input style={{ ...field, marginBottom: 6 }} value={token} onChange={e => setToken(e.target.value)}
+            placeholder="Token da instância" autoComplete="off" spellCheck={false} />
+          <input style={{ ...field, marginBottom: 8 }} value={name} onChange={e => setName(e.target.value)}
+            placeholder="Nome da instância (opcional, só para referência)" />
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.5 }}>
+            Cria uma instância nova no servidor da Uazapi. Depende do admintoken do
+            servidor estar configurado neste projeto — se não estiver, use a outra opção.
+          </div>
+          <input style={{ ...field, marginBottom: 8 }} value={name} onChange={e => setName(e.target.value)}
+            placeholder="Nome da instância (ex.: marpe-crm)" />
+        </>
+      )}
+
+      {err && <div style={{ fontSize: 11.5, color: '#f87171', marginBottom: 8, lineHeight: 1.5 }}>{err}</div>}
+      {ok && <div style={{ fontSize: 11.5, color: 'var(--green)', marginBottom: 8, lineHeight: 1.5 }}>{ok}</div>}
+
+      <button
+        onClick={submit}
+        disabled={busy || (mode === 'token' ? !token.trim() : !name.trim())}
+        style={{
+          padding: '8px 16px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.18)',
+          background: 'linear-gradient(180deg, #4F8FF7, #2E6BE6)', color: '#fff',
+          fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+          cursor: busy ? 'default' : 'pointer',
+          opacity: busy || (mode === 'token' ? !token.trim() : !name.trim()) ? 0.5 : 1,
+        }}>
+        {busy ? 'Validando…' : mode === 'token' ? 'Validar e salvar' : 'Criar instância'}
+      </button>
+    </div>
+  );
+}
+
 type QrPhase = 'idle' | 'loading' | 'showing' | 'scanning' | 'connected' | 'error';
 
 function WhatsAppQrPanel({ waStatus, onStatusChange }: {
@@ -634,16 +742,10 @@ function WhatsAppQrPanel({ waStatus, onStatusChange }: {
           <div style={{ fontSize: 12, color: '#f87171', marginBottom: 8 }}>{errorMsg}</div>
           {/* S1 (PDF Sync §8, 27/07): "UazapiGO connect error 401" não é erro de rede
               nem de QR — é o TOKEN da instância recusado pela Uazapi ("Invalid token").
-              Tentar de novo nunca resolve; quem resolve é o painel da Uazapi. Então a
-              tela passa a dizer o que fazer, em vez de repetir um retry inútil. */}
+              Tentar de novo nunca resolve. Em vez de um retry inútil, abrimos aqui o
+              fluxo de reconectar o número pela própria plataforma. */}
           {/401|invalid token|token inv/i.test(errorMsg) && (
-            <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 12, padding: '10px 12px', background: 'var(--amber-dim)', border: '1px solid rgba(217,119,6,0.3)', borderRadius: 10 }}>
-              <strong style={{ color: 'var(--amber)' }}>Token da instância inválido.</strong><br />
-              A Uazapi está recusando o token configurado — nenhum envio, QR Code ou
-              sincronização vai funcionar até ele ser renovado. É preciso gerar um token
-              novo no painel da Uazapi e atualizar a variável <code>UAZAPI_TOKEN</code> no
-              Vercel. Falar com o Tiago (u4digital).
-            </div>
+            <InstanceRecovery onDone={() => { setPhase('idle'); setErrorMsg(''); onStatusChange(); }} />
           )}
           <button style={btn('primary')} onClick={fetchQr}>
             ↺ Tentar novamente
@@ -927,7 +1029,13 @@ export default function ConfigView() {
                     <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>{v}</span>
                   </div>
                 ))}
-                {waStatus.error && (
+                {/* 27/07: token recusado tem caminho próprio — o QR não resolve */}
+                {waStatus.status === 'invalid_token' && (
+                  <div style={{ marginTop: 12 }}>
+                    <InstanceRecovery onDone={checkWa} />
+                  </div>
+                )}
+                {waStatus.error && waStatus.status !== 'invalid_token' && (
                   <div style={{ fontSize: 12, color: '#f87171', marginTop: 8 }}>{waStatus.error}</div>
                 )}
               </div>

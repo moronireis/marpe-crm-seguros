@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
 import { normalizePhone } from '../../../lib/whatsapp/send';
+import { getInstanceToken } from '../../../lib/whatsapp/instance';
 
 export const prerender = false;
 
@@ -71,7 +72,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   }
 
   const UAZAPI_URL = (import.meta.env.UAZAPI_URL || 'https://u4digital.uazapi.com').trim();
-  const UAZAPI_TOKEN = (import.meta.env.UAZAPI_TOKEN || '').trim();
+  const UAZAPI_TOKEN = await getInstanceToken();
 
   const phoneForSend = String(phone).endsWith('@g.us') ? phone : normalizePhone(phone);
 

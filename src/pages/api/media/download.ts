@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { requireAuth } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
+import { getInstanceToken } from '../../../lib/whatsapp/instance';
 
 export const prerender = false;
 
@@ -23,7 +24,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
   if (!msgId) return new Response('Missing msgid', { status: 400 });
 
   const UAZAPI_URL = (import.meta.env.UAZAPI_URL || 'https://u4digital.uazapi.com').trim();
-  const UAZAPI_TOKEN = (import.meta.env.UAZAPI_TOKEN || '').trim();
+  const UAZAPI_TOKEN = await getInstanceToken();
   const sb = createServerClient();
 
   const { data: msg } = await sb

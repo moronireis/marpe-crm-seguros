@@ -1,4 +1,5 @@
 import { normalizePhone } from './send';
+import { getInstanceToken } from './instance';
 
 /**
  * Foto de perfil do WhatsApp via UazapiGO (checkpoint 14/07 — "Foto do contato
@@ -11,7 +12,7 @@ import { normalizePhone } from './send';
  */
 export async function fetchProfilePhoto(phone: string): Promise<string | null> {
   const UAZAPI_URL = import.meta.env.UAZAPI_URL;
-  const UAZAPI_TOKEN = import.meta.env.UAZAPI_TOKEN;
+  const UAZAPI_TOKEN = await getInstanceToken();
   if (!UAZAPI_URL || !UAZAPI_TOKEN) return null;
 
   const number = normalizePhone(phone);
