@@ -158,6 +158,8 @@ interface CurrentUser { id: string; full_name: string; }
 
 interface NewDealForm {
   contact_id: string;
+  // §10 (28/07): "nome do negócio" — sobrescreve o título gerado (Contato — Ramo)
+  title: string;
   ramo: string; seguradora: string; deal_type: string;
   premio: string; comissao_pct: string; pct_repasse: string;
   comissao_valor: string; valor_repasse: string;
@@ -169,7 +171,8 @@ interface NewDealForm {
   base_calculo_repasse: string;
 }
 const EMPTY_FORM: NewDealForm = {
-  contact_id: '', ramo: '', seguradora: '', deal_type: 'prospeccao',
+  contact_id: '',
+  title: '', ramo: '', seguradora: '', deal_type: 'prospeccao',
   premio: '', comissao_pct: '', pct_repasse: '',
   comissao_valor: '', valor_repasse: '',
   next_action: '', next_action_date: '',
@@ -737,6 +740,8 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
         agente: form.agente || null,
         produtor: form.produtor || null,
         observacoes_proposta: form.observacoes_proposta || null,
+        // §10 (28/07): nome do negócio opcional — vazio deixa o título automático
+        title: form.title.trim() || undefined,
         corp_codram: corpRamo?.codigo || null,
         corp_codcia: corpCia?.codigo || null,
         corp_tipo: corpTipo?.codigo || null,
@@ -809,6 +814,12 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
             {form.contact_id && (
               <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4 }}>Contato selecionado</div>
             )}
+          </div>
+
+          {/* §10 (28/07): nome do negócio — opcional; vazio mantém "Contato — Ramo" */}
+          <div>
+            <label style={LABEL_S}>Nome do negócio <span style={{ textTransform: 'none', letterSpacing: 0 }}>(opcional)</span></label>
+            <input value={form.title} onChange={field('title')} placeholder="Se vazio, usa Contato — Ramo" style={INPUT_S} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

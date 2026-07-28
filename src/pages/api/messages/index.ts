@@ -119,6 +119,14 @@ export const POST: APIRoute = async ({ locals, request }) => {
       status: 'sent',
       sent_by: profile.id !== 'mvp-admin' ? profile.id : null,
     });
+
+    // Aba Atendimento (critério do Tiago, 28/07): "clicar numa conversa e
+    // responder → muda para a aba de atendimento". Responder também reabre
+    // uma conversa finalizada, já como atendimento.
+    await sb.from('marpe_contacts')
+      .update({ conv_status: 'atendimento' })
+      .eq('id', body.contact_id)
+      .then(null, () => {});
   }
 
   return new Response(JSON.stringify({ ok: true, messageid: uaData.messageid }), { status: 200 });

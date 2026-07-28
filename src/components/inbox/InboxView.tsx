@@ -313,13 +313,15 @@ function formatTime(iso: string): string {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
-type InboxTab = 'conversas' | 'grupos' | 'naolidas' | 'finalizadas';
+type InboxTab = 'conversas' | 'grupos' | 'naolidas' | 'finalizadas' | 'atendimento';
 
 const TAB_LABELS: Record<InboxTab, string> = {
   conversas: 'Conversas',
   grupos: 'Grupos',
   naolidas: 'Não lidas',
   finalizadas: 'Finalizadas',
+  // Critério do Tiago (28/07): respondeu → a conversa entra em Atendimento
+  atendimento: 'Atendimento',
 };
 
 // S1 #15 (27/07): filtros do Inbox persistem entre telas e sessões — mesmo
@@ -333,7 +335,7 @@ function loadInboxPrefs(): { tab: InboxTab; tag: string } {
     const raw = window.localStorage.getItem(INBOX_PREFS_KEY);
     if (!raw) return fallback;
     const p = JSON.parse(raw);
-    const tab: InboxTab = ['conversas', 'grupos', 'naolidas', 'finalizadas'].includes(p?.tab) ? p.tab : 'conversas';
+    const tab: InboxTab = ['conversas', 'grupos', 'naolidas', 'finalizadas', 'atendimento'].includes(p?.tab) ? p.tab : 'conversas';
     return { tab, tag: typeof p?.tag === 'string' ? p.tag : '' };
   } catch {
     return fallback;
@@ -343,8 +345,9 @@ function loadInboxPrefs(): { tab: InboxTab; tag: string } {
 export default function InboxView() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState('');
-  // S1 #9: abas do funil de atendimento (a aba "Atendimento" do PDF depende do
-  // critério de entrada/saída que ainda precisa vir do Marcel — não inventamos aqui).
+  // S1 #9: abas do funil de atendimento. Critério da aba "Atendimento" definido
+  // pelo Tiago em 28/07: responder → Atendimento; nova conversa conta em Não
+  // lidas; finalizar → Finalizadas.
   const [activeTab, setActiveTab] = useState<InboxTab>('conversas');
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -666,12 +669,18 @@ export default function InboxView() {
 
   // S1 #1 (27/07): scroll infinito no lugar do botão "Carregar anteriores" —
   // ao chegar perto do topo, puxa a janela anterior sozinho (padrão WhatsApp Web).
+  const lastScrollTopRef = useRef(0);
   useEffect(() => {
     const list = msgListRef.current;
     if (!list) return;
     function onScroll() {
       if (!list) return;
-      if (list.scrollTop < 120 && hasMoreMsgs && !loadingOlder && !loadingMsgs) {
+      // Report 28/07: só dispara SUBINDO — na abertura o scroll programático desce
+      // a partir do topo e sem este guard o gatilho puxava a janela anterior no
+      // meio da animação.
+      const goingUp = list.scrollTop < lastScrollTopRef.current;
+      lastScrollTopRef.current = list.scrollTop;
+      if (goingUp && list.scrollTop < 120 && hasMoreMsgs && !loadingOlder && !loadingMsgs) {
         loadOlderMessages();
       }
     }
@@ -681,10 +690,18 @@ export default function InboxView() {
 
   // Scroll to bottom on new messages — só quando a ÚLTIMA mensagem muda
   // (#30: prepend de "Carregar anteriores" não pode jogar o scroll para o fim)
+  // Report 28/07 ("efeito estranho ao abrir chat com áudio"): ao ABRIR a conversa
+  // o scroll suave percorria o histórico inteiro desde o topo — e no caminho
+  // passava pela zona de gatilho do scroll infinito, que puxava mensagens antigas
+  // no meio da animação (briga de scroll + salto). Abertura agora é um pulo
+  // instantâneo; o suave fica só para mensagem nova chegando na conversa aberta.
   const lastMsgId = messages[messages.length - 1]?.id;
+  const scrolledContactRef = useRef<string | null>(null);
   useEffect(() => {
-    msgEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [lastMsgId]);
+    const isNewChat = scrolledContactRef.current !== activeContactId;
+    scrolledContactRef.current = activeContactId;
+    msgEndRef.current?.scrollIntoView({ behavior: isNewChat ? 'auto' : 'smooth' });
+  }, [lastMsgId, activeContactId]);
 
   // Poll for new messages every 3s — compares last message ID, not count.
   // #30: mescla apenas as mensagens NOVAS no fim, preservando janelas antigas
@@ -765,16 +782,21 @@ export default function InboxView() {
     let list = contacts;
     if (activeTab === 'naolidas') list = list.filter(isUnread);
     if (activeTab === 'finalizadas') list = list.filter(c => (c as any).conv_status === 'closed');
-    // fora da aba Finalizadas, conversa fechada sai da lista (é o "mover para outro lugar")
-    if (activeTab === 'conversas' || activeTab === 'naolidas') {
-      list = list.filter(c => (c as any).conv_status !== 'closed');
-    }
+    // Critério do Tiago (28/07): responder move a conversa para Atendimento;
+    // Conversas fica com as que ainda não tiveram resposta nossa.
+    if (activeTab === 'atendimento') list = list.filter(c => (c as any).conv_status === 'atendimento');
+    if (activeTab === 'conversas') list = list.filter(c => (c as any).conv_status !== 'closed' && (c as any).conv_status !== 'atendimento');
+    if (activeTab === 'naolidas') list = list.filter(c => (c as any).conv_status !== 'closed');
     if (tagFilter) list = list.filter(c => (c.tags || []).includes(tagFilter));
     return [...list].sort((a, b) => ((b as any).pinned ? 1 : 0) - ((a as any).pinned ? 1 : 0));
   }, [contacts, activeTab, tagFilter, isUnread]);
 
   const closedCount = useMemo(
     () => contacts.reduce((n, c) => n + ((c as any).conv_status === 'closed' ? 1 : 0), 0),
+    [contacts]
+  );
+  const atendimentoCount = useMemo(
+    () => contacts.reduce((n, c) => n + ((c as any).conv_status === 'atendimento' ? 1 : 0), 0),
     [contacts]
   );
 
@@ -967,6 +989,9 @@ export default function InboxView() {
       });
       setNewMsg('');
       if (inputRef.current) inputRef.current.style.height = 'auto';
+      // Aba Atendimento (28/07): responder move a conversa — reflete na hora,
+      // o servidor grava o mesmo estado
+      if (activeContactId) patchContactLocal(activeContactId, { conv_status: 'atendimento' });
       // Refresh messages
       const r = await fetch(`/api/messages?contact_id=${activeContactId}`);
       const d = await r.json();
@@ -1018,8 +1043,8 @@ export default function InboxView() {
 
         {/* S1 #9: funil de atendimento em abas — Conversas · Grupos · Não lidas · Finalizadas */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
-          {(['conversas', 'grupos', 'naolidas', 'finalizadas'] as const).map(tab => {
-            const badge = tab === 'naolidas' ? unreadCount : tab === 'finalizadas' ? closedCount : 0;
+          {(['conversas', 'grupos', 'naolidas', 'finalizadas', 'atendimento'] as const).map(tab => {
+            const badge = tab === 'naolidas' ? unreadCount : tab === 'finalizadas' ? closedCount : tab === 'atendimento' ? atendimentoCount : 0;
             const on = activeTab === tab;
             return (
               <button key={tab} onClick={() => setActiveTab(tab)} title={TAB_LABELS[tab]}
@@ -1075,6 +1100,7 @@ export default function InboxView() {
             <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
               {activeTab === 'naolidas' ? 'Nenhuma conversa não lida'
                 : activeTab === 'finalizadas' ? 'Nenhuma conversa finalizada'
+                : activeTab === 'atendimento' ? 'Nenhuma conversa em atendimento — responda uma conversa e ela entra aqui'
                 : activeTab === 'grupos' ? 'Nenhum grupo encontrado'
                 : 'Nenhum contato encontrado'}
             </div>

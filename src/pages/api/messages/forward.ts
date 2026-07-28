@@ -144,6 +144,11 @@ export const POST: APIRoute = async ({ locals, request }) => {
           sent_by: profile.id !== 'mvp-admin' ? profile.id : null,
           metadata: { forwarded_from: msg.id },
         });
+        // Aba Atendimento (28/07): encaminhar é uma interação nossa com o destino
+        await sb.from('marpe_contacts')
+          .update({ conv_status: 'atendimento' })
+          .eq('id', target.id)
+          .then(null, () => {});
         results.push({ ...tag, ok: true });
       } catch (e: any) {
         results.push({ ...tag, ok: false, error: e?.message || 'Falha inesperada' });

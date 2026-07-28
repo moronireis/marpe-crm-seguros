@@ -32,6 +32,11 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
   const [loading, setLoading] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Report 28/07: o poll de 5s rolava para o fim a CADA fetch, mesmo com o usuário
+  // lendo mensagens antigas. Só rola quando a última mensagem MUDA (e na abertura,
+  // pulo instantâneo em vez de animação pelo histórico inteiro).
+  const lastMsgIdRef = useRef<string | null>(null);
+  const openedKeyRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Template picker: "/" prefix opens the dropdown (same UX as the inbox)
@@ -106,7 +111,15 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
         });
         setHasMore(!!d.has_more);
         setLoading(false);
-        setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        const incoming: Message[] = d.messages || [];
+        const lastId = incoming[incoming.length - 1]?.id || null;
+        const key = `${dealId}:${contactId}`;
+        const firstOpen = openedKeyRef.current !== key;
+        if (lastId && (firstOpen || lastMsgIdRef.current !== lastId)) {
+          openedKeyRef.current = key;
+          lastMsgIdRef.current = lastId;
+          setTimeout(() => endRef.current?.scrollIntoView({ behavior: firstOpen ? 'auto' : 'smooth' }), 50);
+        }
       })
       .catch(() => setLoading(false));
   }
@@ -130,12 +143,17 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
   useEffect(() => { loadMessages(); }, [dealId, contactId]);
 
   // S1 #2 (27/07): scroll infinito para cima, no lugar do botão no topo
+  const lastScrollTopRef = useRef(0);
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
     function onScroll() {
       if (!list) return;
-      if (list.scrollTop < 100 && hasMore && !loadingOlder && !loading) loadOlder();
+      // Report 28/07: dispara só SUBINDO — mesma correção do Inbox (na abertura o
+      // scroll programático passa pelo topo e puxava a janela anterior à toa)
+      const goingUp = list.scrollTop < lastScrollTopRef.current;
+      lastScrollTopRef.current = list.scrollTop;
+      if (goingUp && list.scrollTop < 100 && hasMore && !loadingOlder && !loading) loadOlder();
     }
     list.addEventListener('scroll', onScroll, { passive: true });
     return () => list.removeEventListener('scroll', onScroll);

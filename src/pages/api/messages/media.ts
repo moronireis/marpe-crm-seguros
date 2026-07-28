@@ -122,5 +122,13 @@ export const POST: APIRoute = async ({ locals, request }) => {
   if (dbErr) {
     return new Response(JSON.stringify({ sent: true, saved: false, error: dbErr.message }), { status: 200 });
   }
+
+  // Aba Atendimento (critério do Tiago, 28/07): responder com mídia também
+  // move a conversa para "em atendimento"
+  await sb.from('marpe_contacts')
+    .update({ conv_status: 'atendimento' })
+    .eq('id', contact_id)
+    .then(null, () => {});
+
   return new Response(JSON.stringify({ sent: true, message: saved }), { status: 200 });
 };
