@@ -34,12 +34,19 @@ const CATEGORY_LABELS: Record<string, string> = {
   geral: 'Geral',
 };
 
+// Revisão 28/07 (PDF Campanha/Templates): variáveis remapeadas conforme os
+// campos disponíveis hoje no CRM + integração Corp.
 const VARIABLES_CONTATO = [
   { token: '{{nome}}', label: 'Nome completo' },
   { token: '{{primeiro_nome}}', label: 'Primeiro nome' },
   { token: '{{telefone}}', label: 'Telefone' },
   { token: '{{email}}', label: 'E-mail' },
   { token: '{{cidade}}', label: 'Cidade' },
+  { token: '{{estado}}', label: 'UF' },
+  { token: '{{endereco}}', label: 'Endereço' },
+  { token: '{{cpf_cnpj}}', label: 'CPF/CNPJ' },
+  { token: '{{vencimento_cnh}}', label: 'Vencimento da CNH' },
+  { token: '{{nome_negocio}}', label: 'Nome do negócio (empresa)' },
 ];
 
 const VARIABLES_NEGOCIO = [
@@ -54,6 +61,8 @@ const VARIABLES_NEGOCIO = [
   { token: '{{vigencia_inicio}}', label: 'Vigência início' },
   { token: '{{vigencia_fim}}', label: 'Vigência fim' },
   { token: '{{proxima_acao}}', label: 'Próxima ação' },
+  { token: '{{codigo_negocio}}', label: 'Código no Corp' },
+  { token: '{{tipo_negocio}}', label: 'Tipo de negócio' },
 ];
 
 // S4.2 (issue #18): variáveis do funil de Sinistros (populadas pelo sync do Corp)

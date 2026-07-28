@@ -1197,6 +1197,9 @@ export default function ConfigView() {
                 Processa em lotes de 50 contatos. Fotos futuras são capturadas automaticamente via webhook quando um contato envia mensagem.
               </p>
             </div>
+
+            {/* Revisão 28/07 (Inbox #6): recuperar a lista de conversas da instância */}
+            <ImportChatsCard />
           </div>
         )}
 
@@ -1264,6 +1267,9 @@ export default function ConfigView() {
                 </div>
               </div>
             ))}
+
+            {/* Revisão 28/07 (PDF Sync §2-§5): "puxar/listar os cadastros do Corp para consulta" */}
+            <CorpCadastrosConsulta />
           </div>
         )}
 
@@ -1417,6 +1423,128 @@ export default function ConfigView() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Revisão 28/07 · Inbox #6: importar conversas da instância ────────────────
+// Depois do incidente que zerou o histórico, a lista do Inbox só repovoava
+// conforme mensagens novas chegassem. A UazapiGO expõe POST /chat/find com TODOS
+// os chats (nome, foto, grupo/individual) — este card recria os contatos de uma
+// vez. Mensagens antigas não voltam por aqui (só via backup do banco).
+function ImportChatsCard() {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ total_chats: number; created: number; updated: number; groups: number; individuals: number } | null>(null);
+  const [err, setErr] = useState('');
+
+  async function run() {
+    if (running) return;
+    if (!confirm('Importar as conversas do WhatsApp?\n\nIsso recria os contatos (nomes e fotos) a partir das conversas existentes na instância. Não traz mensagens antigas e não apaga nada.')) return;
+    setRunning(true); setErr(''); setResult(null);
+    try {
+      const r = await fetch('/api/admin/import-chats', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'Falha na importação'); }
+      else setResult(d);
+    } catch (e: any) {
+      setErr(e?.message || 'Erro de rede');
+    }
+    setRunning(false);
+  }
+
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, marginTop: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Importar conversas do WhatsApp</div>
+      <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 12 }}>
+        Recria a lista de contatos (nomes e fotos) a partir das conversas que existem no número conectado.
+        Útil quando contatos sumiram da lista. Mensagens antigas não são recuperadas por aqui.
+      </p>
+
+      {result && (
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.22)' }}>
+          {result.total_chats} conversas na instância · <span style={{ color: 'var(--green)', fontWeight: 600 }}>{result.created} contatos criados</span> · {result.updated} atualizados
+          <span style={{ color: 'var(--text-muted)' }}> ({result.individuals} individuais, {result.groups} grupos)</span>
+        </div>
+      )}
+      {err && <div style={{ fontSize: 12, color: '#f87171', marginBottom: 10 }}>{err}</div>}
+
+      <button onClick={run} disabled={running}
+        style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: running ? 'rgba(59,130,246,0.3)' : 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 500, cursor: running ? 'not-allowed' : 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        {running ? (
+          <>
+            <svg style={{ animation: 'spin 1s linear infinite' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+            Importando…
+          </>
+        ) : 'Importar conversas'}
+      </button>
+    </div>
+  );
+}
+
+// ─── Revisão 28/07 · PDF Sync §2-§5: cadastros do Corp para consulta ──────────
+// "Permitir puxar/listar os cadastros do Corp para consulta" — leitura, direto
+// dos lookups. Canais de venda, grupos de produtores e bancos NÃO têm rota na
+// CorpAPI (probe S0; cobrado da Agia) — a nota abaixo registra isso para o
+// cliente não procurar o que não existe.
+function CorpCadastrosConsulta() {
+  const [lookups, setLookups] = useState<any>(null);
+  const [open, setOpen] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/corp/lookups').then(r => r.json()).then(setLookups).catch(() => {});
+  }, []);
+
+  const grupos: Array<{ key: string; label: string; rows: Array<{ a: string; b?: string }> }> = lookups ? [
+    { key: 'seguradoras', label: `Seguradoras (${(lookups.seguradoras || []).length})`,
+      rows: (lookups.seguradoras || []).map((x: any) => ({ a: `${x.codigo} — ${x.nome}`, b: x.abreviatura })) },
+    { key: 'ramos', label: `Ramos (${(lookups.ramos || []).length})`,
+      rows: (lookups.ramos || []).map((x: any) => ({ a: `${x.codigo} — ${x.nome}`, b: x.abreviatura })) },
+    { key: 'produtores', label: `Produtores (${(lookups.produtores || []).length})`,
+      rows: (lookups.produtores || []).map((x: any) => ({ a: `${x.codigo} — ${x.nome}` })) },
+    { key: 'agentes', label: `Agentes (${(lookups.agentes || []).length})`,
+      rows: (lookups.agentes || []).map((x: any) => ({ a: `${x.codigo} — ${x.nome}` })) },
+    { key: 'profissoes', label: `Profissões (${(lookups.profissoes || []).length})`,
+      rows: (lookups.profissoes || []).map((x: any) => ({ a: `${x.codigo} — ${x.profissao}` })) },
+    { key: 'estado_civil', label: `Estados civis (${(lookups.estados_civis || []).length})`,
+      rows: (lookups.estados_civis || []).map((x: any) => ({ a: `${x.codigo} — ${x.descricao}` })) },
+    { key: 'escolaridade', label: `Escolaridades (${(lookups.escolaridades || []).length})`,
+      rows: (lookups.escolaridades || []).map((x: any) => ({ a: `${x.codigo} — ${x.descricao}` })) },
+  ] : [];
+
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginTop: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Cadastros do Corp (consulta)</div>
+      <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 12 }}>
+        Listas lidas direto do Corp, somente leitura — como estão lá.
+        {' '}<span style={{ color: 'var(--text-secondary)' }}>Canais de venda, grupos de produtores e bancos não são expostos pela API do Corp (já solicitado à Agia).</span>
+      </p>
+
+      {!lookups ? (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Carregando…</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {grupos.map(g => (
+            <div key={g.key} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+              <button onClick={() => setOpen(open === g.key ? null : g.key)}
+                style={{ width: '100%', textAlign: 'left', padding: '9px 13px', background: open === g.key ? 'rgba(59,130,246,0.08)' : 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {g.label}
+                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{open === g.key ? '▾' : '▸'}</span>
+              </button>
+              {open === g.key && (
+                <div style={{ maxHeight: 260, overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
+                  {g.rows.map((r, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 13px', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.a}</span>
+                      {r.b && <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{r.b}</span>}
+                    </div>
+                  ))}
+                  {g.rows.length === 0 && <div style={{ padding: '8px 13px', fontSize: 12, color: 'var(--text-muted)' }}>Nada retornado pelo Corp.</div>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

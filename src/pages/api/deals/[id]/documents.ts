@@ -20,7 +20,18 @@ export const GET: APIRoute = async ({ locals, params }) => {
     .order('created_at', { ascending: false });
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  return new Response(JSON.stringify({ documents: data }), { status: 200 });
+
+  // 28/07: o bucket é PRIVADO — o front montava URL /object/public/ e o download
+  // nunca abriu. Cada doc sai com signed_url (1h), como nos anexos do cliente.
+  const docs = await Promise.all((data || []).map(async (doc: any) => {
+    const { data: signed } = await sb.storage
+      .from('marpe-deal-docs')
+      .createSignedUrl(doc.file_path, 3600)
+      .then(r => r, () => ({ data: null } as any));
+    return { ...doc, signed_url: signed?.signedUrl || null };
+  }));
+
+  return new Response(JSON.stringify({ documents: docs }), { status: 200 });
 };
 
 // POST /api/deals/[id]/documents — upload a document

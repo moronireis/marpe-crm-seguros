@@ -6,6 +6,7 @@ interface Deal {
   vigencia_inicio: string | null; vigencia_fim: string | null; veiculo: string | null; placa: string | null;
   deal_type: string | null; next_action: string | null; next_action_date: string | null;
   stage_id: string; funnel_id: string;
+  corp_id?: string | null;
   status_custom: string | null; status_color: string | null;
   // New fields
   campanha: string | null; ja_possui_produto: boolean; seguradora_atual: string | null;
@@ -209,6 +210,14 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
             <span>Dados Gerais</span>
             <button onClick={() => setEditing(true)} style={{ fontSize: 10, color: 'var(--accent-light)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textTransform: 'none', fontWeight: 500 }}>Editar</button>
           </div>
+          {/* §7.1 (28/07): "trazer o código do negócio na guia Info do card" —
+              corp_id vem no formato do sync (neg_1_7512); mostramos o código puro */}
+          {deal.corp_id && (
+            <div style={s.row}>
+              <span style={s.label}>Código no Corp</span>
+              <span style={{ ...s.value, fontFamily: 'monospace' }}>{String(deal.corp_id).match(/(\d+)$/)?.[1] || deal.corp_id}</span>
+            </div>
+          )}
           <div style={s.row}><span style={s.label}>Tipo</span><span style={s.value}>{DEAL_TYPES[deal.deal_type || ''] || '—'}</span></div>
           <div style={s.row}><span style={s.label}>Ramo</span><span style={s.value}>{resolveRamoNome(deal, lookups)}</span></div>
           <div style={s.row}><span style={s.label}>Seguradora</span><span style={s.value}>{deal.seguradora || '—'}</span></div>

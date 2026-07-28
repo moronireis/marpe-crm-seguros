@@ -2039,6 +2039,14 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
                                   Ação: {formatDate(d.next_action_date)}
                                 </div>
                               )}
+                              {/* §7.3 (28/07): o preview do card mostra o TEXTO da próxima
+                                  ação — o sync agora recupera a descrição via join nos
+                                  atendimentos do Corp, e sinistros/edições locais já gravam */}
+                              {d.next_action && (
+                                <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.next_action}>
+                                  {d.next_action}
+                                </div>
+                              )}
                               <div style={{ display: 'flex', gap: 12, fontSize: 10 }}>
                                 {d.premio && <span><span style={{ color: 'var(--text-muted)' }}>Prêmio </span><span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{formatPremio(d.premio)}</span></span>}
                                 {d.apolice && <span style={{ color: 'var(--text-muted)' }}>#{d.apolice.slice(-6)}</span>}

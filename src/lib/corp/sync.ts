@@ -210,7 +210,11 @@ function negocioListFields(neg: CorpNegocio): Record<string, any> {
     tipo_negocio: neg.tipo_neg || null,
     deal_type: neg.tipo_neg?.toLowerCase()?.includes('renova') ? 'renovacao' : 'prospeccao',
     next_action_date: parseCorpDate(neg.prox_aten_data),
-    next_action: neg.prox_aten_descricao || null,
+    // Revisão 28/07 (§7.3): prox_aten_descricao vem null em 100% da lista (S0
+    // mediu 60/60) — sobrescrever sempre APAGAVA qualquer texto local. Só toca a
+    // coluna quando a API realmente mandar algo; a descrição de verdade vem do
+    // detail (join prox_aten_codigo ↔ atendimentos[]), em negocioDetailFields.
+    ...(neg.prox_aten_descricao ? { next_action: neg.prox_aten_descricao } : {}),
     vigencia_inicio: parseCorpDate(neg.inivig),
     vigencia_fim: parseCorpDate(neg.fimvig),
   };
@@ -234,8 +238,22 @@ function extractProdutorAgente(det: any): { produtor?: string; agente?: string }
 // Maps Corp negocio DETAIL fields → marpe_deals columns (Fase 2 fields).
 // Exportada para o refresh por negócio do DealPanel (/api/corp/refresh-deal).
 export function negocioDetailFields(det: CorpNegocioDetail): Record<string, any> {
+  // §7.3 (28/07): a descrição da "Próxima ação" não vem em prox_aten_descricao
+  // (sempre null), mas o atendimento apontado por prox_aten_codigo está no array
+  // atendimentos[] do próprio detail — quando ele tem texto, é ESSE o descritivo
+  // que a tela do Corp mostra. Validado no probe S0 (3/10 tinham texto; o resto
+  // é atendimento sem descrição mesmo).
+  const proxCod = (det as any).prox_aten_codigo ?? null;
+  const proxAten = proxCod
+    ? (det.atendimentos || []).find((a: any) => a?.codigo === proxCod)
+    : null;
+  const proxDescricao = typeof (proxAten as any)?.descricao === 'string'
+    ? (proxAten as any).descricao.trim()
+    : '';
+
   return {
     ...extractProdutorAgente(det),
+    ...(proxDescricao ? { next_action: proxDescricao } : {}),
     comissao_pct: det.per_c || null,
     campanha: det.campanha || null,
     seguradora: det.seguradora || null,

@@ -87,7 +87,9 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
     // Sprint S3 (checkpoint 15/07): leitura, favorito e status da conversa
     'inbox_read_at', 'pinned', 'conv_status',
     // S3 (27/07): campos do cadastro PF/PJ
-    'escolaridade', 'cnh_vencimento', 'contato_empresa'];
+    'escolaridade', 'cnh_vencimento', 'contato_empresa',
+    // Revisão 28/07 (§10): campos comuns só-CRM
+    'nome_negocio', 'produto_detalhes'];
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const key of allowed) {

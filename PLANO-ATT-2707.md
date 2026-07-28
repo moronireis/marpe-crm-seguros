@@ -211,3 +211,38 @@ S0 (probes) → S1 (inbox) → S3 (cadastros) → S2 (encaminhar/reações) → 
 4. S7 API oficial Meta: seguir para orçamento?
 5. Aba Status: remover de vez ou só ocultar (há dados de status em uso nos cards)
 6. Pendentes antigos: P-A (msg agendada), P-B (lembretes), P-C (transferir atendimento) — o funil de abas do S1 conversa com isso
+
+---
+
+## ✅ Revisão 28/07 — pente-fino dos 4 PDFs (o que faltava foi aplicado)
+
+Auditoria item a item dos PDFs contra o código (não contra o que estava marcado como feito).
+Resultado: PDFs 1, 2 e 4 estavam essencialmente cobertos; as lacunas reais estavam no **PDF 3
+(Sincronização §7 e §10)** — e duas coisas dadas como perdidas eram consertáveis.
+
+### Aplicado nesta revisão (commit da revisão 28/07)
+
+| PDF / item | O que faltava | Como ficou |
+|---|---|---|
+| Sync §7.1 | Código do negócio na guia Info | Linha "Código no Corp" (extraído do corp_id `neg_1_XXXX`) |
+| Sync §7.2 | "de → para" na mudança de etapa | Descrição agora resolve os NOMES: "Etapa alterada: X → Y" (autor já aparecia) |
+| Sync §7.3 | Texto da próxima ação no card | Card mostra o texto; e o SYNC agora recupera a descrição via join `prox_aten_codigo ↔ atendimentos[]` (descoberta do S0 que não tinha sido ligada). Bônus: a lista não sobrescreve mais `next_action` com null a cada sync |
+| Sync §1 | Contato principal p/ PF também | Campo virou comum (antes só PJ) |
+| Sync §10 | "Nome do negócio" e "Detalhes do produto" | Campos comuns PF/PJ no Novo Cliente + tela do contato (só CRM) |
+| Sync §10 | Abas Dados Bancários e Anexos | Seções na tela do contato: contas bancárias (CRUD) + anexos com upload — tabelas `marpe_contact_bank` / `marpe_contact_documents`, migração 20260728 |
+| Sync §2–§5 | "Puxar/listar cadastros do Corp para consulta" | Config > Corp ganhou "Cadastros do Corp (consulta)": seguradoras, ramos, produtores, agentes, profissões, estados civis, escolaridades |
+| Templates (PDF 4) | "Remapear variáveis conforme os campos do CRM/Corp" | +7 variáveis: `{{cpf_cnpj}}`, `{{endereco}}`, `{{estado}}`, `{{vencimento_cnh}}`, `{{nome_negocio}}`, `{{codigo_negocio}}`, `{{tipo_negocio}}` |
+| Inbox #4 | "Sincronizar fotos funciona?" | **Não funcionava**: o endpoint usava 4 rotas que não existem (probe: todas 405). Reescrito para a rota real `POST /chat/details` (validada de novo em 28/07, devolve a foto) |
+| Inbox #6 | Contatos que sumiram | **Recuperável**: descoberta a rota `POST /chat/find` (lista TODOS os chats da instância). Novo botão Config > WhatsApp > "Importar conversas" recria os contatos (nomes + fotos; mensagens antigas não) |
+| Bônus | Download de documentos do negócio quebrado | O front montava URL pública de bucket PRIVADO — nunca abriu. Agora a API manda `signed_url` (negócio e cliente) |
+
+### Continua de fora — por decisão ou por bloqueio externo (sem mudança)
+
+| Item | Motivo |
+|---|---|
+| Aba "Atendimento" no Inbox | Falta o critério de entrada/saída (decisão 1 — Marcel) |
+| "Aprimorar respostas com IA" | Custo por uso — proposta à parte (decisão 2) |
+| Multi-número por usuário (Sync §8) | Épico S6 — custo de instâncias (decisão 3) |
+| Disparo via API oficial Meta | Épico S7 — orçamento WABA (decisão 4) |
+| Tipo da seguradora, tipo do ramo, bancos, parâmetros de repasse, canais de venda, grupos de produtores | A CorpAPI não expõe (S0) — SOLICITACAO-AGIA v2 itens 10-11 |
+| Edição de NEGÓCIO CRM→Corp e próxima ação no Corp | `PUT /negocio` e `POST /atendimento` respondem 500 — SOLICITACAO-AGIA v2 itens 8-9 |

@@ -2,11 +2,19 @@
  * Variable interpolation engine for WhatsApp message templates.
  *
  * Supported variables:
- *   Contact:  {{nome}}, {{primeiro_nome}}, {{telefone}}, {{email}}, {{cidade}}
+ *   Contact:  {{nome}}, {{primeiro_nome}}, {{telefone}}, {{email}}, {{cidade}},
+ *             {{cpf_cnpj}}, {{endereco}}, {{estado}}, {{vencimento_cnh}},
+ *             {{nome_negocio}}
  *   Deal:     {{veiculo}}, {{placa}}, {{apolice}}, {{seguradora}}, {{premio}},
  *             {{comissao}}, {{ramo}}, {{produtor}}, {{vigencia_inicio}},
- *             {{vigencia_fim}}, {{proxima_acao}}
+ *             {{vigencia_fim}}, {{proxima_acao}}, {{codigo_negocio}},
+ *             {{tipo_negocio}}
  *   Computed: {{periodo_dia}}
+ *
+ * Revisão 28/07 (PDF Campanha/Templates: "remapear tipos de variáveis de acordo
+ * com os campos disponíveis no CRM/integração com o Corp") — entraram os campos
+ * novos do cadastro (cpf_cnpj, endereço, CNH, nome do negócio) e do Corp
+ * (código da negociação, tipo).
  *
  * Missing values are replaced with an em dash (—) so the message never exposes
  * raw placeholder tokens to the recipient.
@@ -18,6 +26,11 @@ export interface InterpolationContext {
     phone?: string | null;
     email?: string | null;
     city?: string | null;
+    cpf_cnpj?: string | null;
+    address?: string | null;
+    state?: string | null;
+    cnh_vencimento?: string | null;
+    nome_negocio?: string | null;
   };
   deal?: {
     veiculo?: string | null;
@@ -31,6 +44,8 @@ export interface InterpolationContext {
     vigencia_inicio?: string | null;
     vigencia_fim?: string | null;
     next_action?: string | null;
+    corp_id?: string | null;
+    tipo_negocio?: string | null;
     // Sinistros (S4.2, issue #18): campos vindos do sync de sinistros do Corp
     detalhes_corp?: {
       numsin?: string | null;
@@ -94,6 +109,11 @@ export function interpolateVariables(
     telefone: str(contact?.phone),
     email: str(contact?.email),
     cidade: str(contact?.city),
+    cpf_cnpj: str(contact?.cpf_cnpj),
+    endereco: str(contact?.address),
+    estado: str(contact?.state),
+    vencimento_cnh: formatDate(contact?.cnh_vencimento),
+    nome_negocio: str(contact?.nome_negocio),
 
     // ── Deal ───────────────────────────────────────────────────────────────
     veiculo: str(deal?.veiculo),
@@ -107,6 +127,11 @@ export function interpolateVariables(
     vigencia_inicio: formatDate(deal?.vigencia_inicio),
     vigencia_fim: formatDate(deal?.vigencia_fim),
     proxima_acao: str(deal?.next_action),
+    // corp_id vem como neg_1_7512 — a variável entrega só o código que o Corp mostra
+    codigo_negocio: deal?.corp_id
+      ? (String(deal.corp_id).match(/(\d+)$/)?.[1] ?? FALLBACK)
+      : FALLBACK,
+    tipo_negocio: str(deal?.tipo_negocio),
 
     // ── Sinistro (S4.2, issue #18) ─────────────────────────────────────────
     numero_sinistro: str(deal?.detalhes_corp?.numsin as string | null),

@@ -20,6 +20,11 @@ interface Contact {
   responsible_id: string | null;
   source: string | null;
   cpf_cnpj: string | null;
+  // Revisão 28/07 (PDF Sync §1/§10)
+  contato_empresa: string | null;
+  nome_negocio: string | null;
+  produto_detalhes: string | null;
+  cnh_vencimento: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -386,6 +391,11 @@ export default function ContactDetailView({ contactId }: Props) {
             <InfoRow label="Data de nascimento" value={contact.birth_date ? fmtDate(contact.birth_date) : null} />
             <InfoRow label="Profissão"         value={contact.profession} />
             <InfoRow label="Estado civil"      value={contact.marital_status} />
+            {/* Revisão 28/07 — §1/§10 do PDF de Sincronização */}
+            <InfoRow label="Vencimento da CNH" value={contact.cnh_vencimento ? fmtDate(contact.cnh_vencimento) : null} />
+            <InfoRow label="Contato principal" value={contact.contato_empresa} />
+            <InfoRow label="Nome do negócio"   value={contact.nome_negocio} />
+            <InfoRow label="Detalhes do produto" value={contact.produto_detalhes} />
           </div>
 
           {/* Info card — right */}
@@ -445,6 +455,12 @@ export default function ContactDetailView({ contactId }: Props) {
               <p style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>Sem notas.</p>
             )}
           </div>
+        </div>
+
+        {/* ─── §10: abas exclusivas do CRM — Dados Bancários e Anexos ──────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+          <BankSection contactId={contact.id} />
+          <AnexosSection contactId={contact.id} />
         </div>
 
         {/* ─── Deals ──────────────────────────────────────────────────────── */}
@@ -540,6 +556,239 @@ export default function ContactDetailView({ contactId }: Props) {
         </div>
 
       </div>
+    </div>
+  );
+}
+
+// ─── §10 (28/07): Dados Bancários — exclusivo do CRM ─────────────────────────
+// A API do Corp não expõe a aba "Dados Bancários" (probe 09/07; cobrado da Agia).
+
+interface BankAccount {
+  id: string; banco: string | null; agencia: string | null; conta: string | null;
+  tipo_conta: string | null; titular: string | null; pix: string | null; observacoes: string | null;
+}
+
+const BANK_EMPTY = { banco: '', agencia: '', conta: '', tipo_conta: '', titular: '', pix: '', observacoes: '' };
+
+function BankSection({ contactId }: { contactId: string }) {
+  const [accounts, setAccounts] = useState<BankAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ ...BANK_EMPTY });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const F: React.CSSProperties = {
+    width: '100%', boxSizing: 'border-box', padding: '7px 10px', background: 'var(--bg-primary)',
+    border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)',
+    fontSize: 12.5, outline: 'none', fontFamily: 'inherit',
+  };
+
+  function load() {
+    fetch(`/api/contacts/${contactId}/bank`)
+      .then(r => r.json())
+      .then(d => { setAccounts(d.accounts || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+  useEffect(load, [contactId]);
+
+  async function save() {
+    setBusy(true); setErr('');
+    try {
+      const r = await fetch(`/api/contacts/${contactId}/bank`, {
+        method: editingId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingId ? { bank_id: editingId, ...form } : form),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'Falha ao salvar'); setBusy(false); return; }
+      setShowForm(false); setEditingId(null); setForm({ ...BANK_EMPTY });
+      load();
+    } catch { setErr('Erro de rede'); }
+    setBusy(false);
+  }
+
+  async function remove(id: string) {
+    if (!confirm('Remover esta conta bancária?')) return;
+    await fetch(`/api/contacts/${contactId}/bank`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bank_id: id }),
+    }).catch(() => {});
+    load();
+  }
+
+  return (
+    <div style={{ background: 'var(--bg-card)', borderRadius: 14, border: '1px solid var(--border)', padding: '18px 20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <SectionLabel>Dados bancários</SectionLabel>
+        <button onClick={() => { setShowForm(v => !v); setEditingId(null); setForm({ ...BANK_EMPTY }); }}
+          style={{ fontSize: 11, color: 'var(--accent-light)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
+          {showForm ? 'Cancelar' : '+ Adicionar'}
+        </button>
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+        Somente no CRM — a API do Corp não expõe dados bancários.
+      </div>
+
+      {showForm && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 1fr', gap: 8 }}>
+            <input style={F} placeholder="Banco" value={form.banco} onChange={e => setForm(f => ({ ...f, banco: e.target.value }))} />
+            <input style={F} placeholder="Agência" value={form.agencia} onChange={e => setForm(f => ({ ...f, agencia: e.target.value }))} />
+            <input style={F} placeholder="Conta" value={form.conta} onChange={e => setForm(f => ({ ...f, conta: e.target.value }))} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: 8 }}>
+            <select style={{ ...F, cursor: 'pointer' }} value={form.tipo_conta} onChange={e => setForm(f => ({ ...f, tipo_conta: e.target.value }))}>
+              <option value="">Tipo…</option>
+              <option value="corrente">Corrente</option>
+              <option value="poupanca">Poupança</option>
+              <option value="pagamento">Pagamento</option>
+            </select>
+            <input style={F} placeholder="Titular" value={form.titular} onChange={e => setForm(f => ({ ...f, titular: e.target.value }))} />
+          </div>
+          <input style={F} placeholder="Chave PIX (opcional)" value={form.pix} onChange={e => setForm(f => ({ ...f, pix: e.target.value }))} />
+          <input style={F} placeholder="Observações" value={form.observacoes} onChange={e => setForm(f => ({ ...f, observacoes: e.target.value }))} />
+          {err && <div style={{ fontSize: 11.5, color: '#f87171' }}>{err}</div>}
+          <button onClick={save} disabled={busy}
+            style={{ alignSelf: 'flex-end', padding: '7px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Salvando…' : editingId ? 'Salvar alterações' : 'Adicionar conta'}
+          </button>
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Carregando…</div>
+      ) : accounts.length === 0 && !showForm ? (
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhuma conta cadastrada.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {accounts.map(a => (
+            <div key={a.id} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {a.banco || 'Banco não informado'}
+                    {a.tipo_conta && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {a.tipo_conta}</span>}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2 }}>
+                    {[a.agencia && `Ag. ${a.agencia}`, a.conta && `Conta ${a.conta}`, a.titular].filter(Boolean).join(' · ') || '—'}
+                  </div>
+                  {a.pix && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>PIX: {a.pix}</div>}
+                  {a.observacoes && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{a.observacoes}</div>}
+                </div>
+                <button onClick={() => { setEditingId(a.id); setShowForm(true); setForm({ banco: a.banco || '', agencia: a.agencia || '', conta: a.conta || '', tipo_conta: a.tipo_conta || '', titular: a.titular || '', pix: a.pix || '', observacoes: a.observacoes || '' }); }}
+                  title="Editar" style={{ fontSize: 11, color: 'var(--accent-light)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>Editar</button>
+                <button onClick={() => remove(a.id)} title="Remover"
+                  style={{ fontSize: 11, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>Remover</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── §10 (28/07): Anexos do cliente — upload exclusivo do CRM ────────────────
+// O Corp só permite BAIXAR anexos via API; upload não existe (cobrado da Agia).
+
+interface ContactDoc {
+  id: string; file_name: string; file_size: number | null; created_at: string;
+  signed_url: string | null;
+  marpe_profiles: { full_name: string } | null;
+}
+
+function AnexosSection({ contactId }: { contactId: string }) {
+  const [docs, setDocs] = useState<ContactDoc[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState('');
+
+  function load() {
+    fetch(`/api/contacts/${contactId}/documents`)
+      .then(r => r.json())
+      .then(d => { setDocs(d.documents || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }
+  useEffect(load, [contactId]);
+
+  async function upload(files: FileList | null) {
+    if (!files?.length) return;
+    setUploading(true); setErr('');
+    for (const file of Array.from(files).slice(0, 10)) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch(`/api/contacts/${contactId}/documents`, { method: 'POST', body: fd }).catch(() => null);
+      if (!r?.ok) {
+        const d = await r?.json().catch(() => ({}));
+        setErr(`${file.name}: ${d?.error || 'falha no upload'}`);
+      }
+    }
+    setUploading(false);
+    load();
+  }
+
+  async function remove(id: string, name: string) {
+    if (!confirm(`Remover o anexo "${name}"?`)) return;
+    await fetch(`/api/contacts/${contactId}/documents`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ document_id: id }),
+    }).catch(() => {});
+    load();
+  }
+
+  const fmtSize = (n: number | null) => {
+    if (!n) return '';
+    if (n > 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${Math.ceil(n / 1024)} KB`;
+  };
+
+  return (
+    <div style={{ background: 'var(--bg-card)', borderRadius: 14, border: '1px solid var(--border)', padding: '18px 20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <SectionLabel>Anexos</SectionLabel>
+        <label style={{ fontSize: 11, color: uploading ? 'var(--text-muted)' : 'var(--accent-light)', cursor: uploading ? 'default' : 'pointer', fontWeight: 600 }}>
+          {uploading ? 'Enviando…' : '+ Anexar arquivo'}
+          <input type="file" multiple style={{ display: 'none' }} disabled={uploading}
+            onChange={e => { upload(e.target.files); e.currentTarget.value = ''; }} />
+        </label>
+      </div>
+      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 10 }}>
+        Guardados no CRM — a API do Corp não aceita envio de anexos.
+      </div>
+
+      {err && <div style={{ fontSize: 11.5, color: '#f87171', marginBottom: 8 }}>{err}</div>}
+
+      {loading ? (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Carregando…</div>
+      ) : docs.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>Nenhum anexo.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {docs.map(d => (
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1.7" style={{ flexShrink: 0 }}>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+              </svg>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.file_name}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                  {[fmtSize(d.file_size), d.marpe_profiles?.full_name, fmtDate(d.created_at)].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+              {d.signed_url && (
+                <a href={d.signed_url} target="_blank" rel="noopener noreferrer" title="Baixar"
+                  style={{ fontSize: 11, color: 'var(--accent-light)', textDecoration: 'none', fontWeight: 600, flexShrink: 0 }}>Baixar</a>
+              )}
+              <button onClick={() => remove(d.id, d.file_name)} title="Remover"
+                style={{ fontSize: 11, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}>Remover</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

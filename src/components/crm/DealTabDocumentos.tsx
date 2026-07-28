@@ -8,6 +8,8 @@ interface Document {
   mime_type: string | null;
   created_at: string;
   marpe_profiles: { id: string; full_name: string } | null;
+  /** 28/07: URL assinada gerada pela API — bucket privado não abre por link direto */
+  signed_url?: string | null;
 }
 
 interface Props {
@@ -134,15 +136,8 @@ export default function DealTabDocumentos({ dealId, dealCorpId, contactCorpId }:
     loadDocs();
   }
 
-  function getDownloadUrl(filePath: string) {
-    // Supabase Storage private bucket — generate signed URL via API
-    // For now, construct the storage URL directly
-    const supabaseUrl = (window as any).__SUPABASE_URL || '';
-    if (supabaseUrl) {
-      return `${supabaseUrl}/storage/v1/object/public/marpe-deal-docs/${filePath}`;
-    }
-    return '#';
-  }
+  // 28/07: o link antigo montava /object/public/ num bucket PRIVADO — o download
+  // nunca funcionou. A API agora manda signed_url pronto por documento.
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -210,7 +205,7 @@ export default function DealTabDocumentos({ dealId, dealCorpId, contactCorpId }:
               </div>
               <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                 <a
-                  href={getDownloadUrl(doc.file_path)}
+                  href={doc.signed_url || '#'}
                   target="_blank"
                   rel="noopener"
                   title="Baixar"

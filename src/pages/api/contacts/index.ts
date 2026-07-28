@@ -185,6 +185,9 @@ export const POST: APIRoute = async ({ locals, request }) => {
       escolaridade: body.escolaridade ?? null,
       cnh_vencimento: body.cnh_vencimento || null,
       contato_empresa: body.contato_empresa || null,
+      // Revisão 28/07 (§10, campos comuns PF e PJ — só CRM)
+      nome_negocio: body.nome_negocio || null,
+      produto_detalhes: body.produto_detalhes || null,
       address,
       city: body.city || null,
       state: body.state || null,

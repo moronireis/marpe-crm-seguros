@@ -29,7 +29,12 @@ interface ContactForm {
   estado_civil: string;      // PF — lookup do Corp
   escolaridade: string;      // "Informações adicionais" — lookup do Corp
   cnh_vencimento: string;    // PF — só CRM
-  contato_empresa: string;   // PJ — só CRM ("é onde será feita toda a comunicação")
+  // §1: "contato principal de relacionamento, seja pessoa física ou jurídica" —
+  // vale para os DOIS tipos (revisão 28/07; antes só aparecia em PJ)
+  contato_empresa: string;
+  // §10 (28/07): campos comuns PF e PJ, exclusivos do CRM
+  nome_negocio: string;
+  produto_detalhes: string;
 }
 
 const EMPTY: ContactForm = {
@@ -38,6 +43,7 @@ const EMPTY: ContactForm = {
   cep: '', logradouro: '', numero_end: '', complemento: '',
   bairro: '', city: '', state: 'RS', notes: '',
   estado_civil: '', escolaridade: '', cnh_vencimento: '', contato_empresa: '',
+  nome_negocio: '', produto_detalhes: '',
 };
 
 export default function NewContactModal({ onClose, onCreated }: {
@@ -149,7 +155,9 @@ export default function NewContactModal({ onClose, onCreated }: {
         escolaridade: form.escolaridade ? Number(form.escolaridade) : null,
         // Só CRM — a API do Corp não expõe estes campos
         cnh_vencimento: !isPJ ? (form.cnh_vencimento || null) : null,
-        contato_empresa: isPJ ? (form.contato_empresa || null) : null,
+        contato_empresa: form.contato_empresa || null,
+        nome_negocio: form.nome_negocio || null,
+        produto_detalhes: form.produto_detalhes || null,
         phone: form.phone || null,
         email: form.email || null,
         cep: form.cep || null,
@@ -269,13 +277,25 @@ export default function NewContactModal({ onClose, onCreated }: {
             </div>
           )}
 
-          {/* PDF Sync §10: em PJ, contato na empresa — "é onde será feita toda a comunicação" */}
-          {isPJ && (
+          {/* §1 (28/07): contato principal de relacionamento — PF e PJ.
+              Em PJ é "onde será feita toda a comunicação" (§10). */}
+          <div>
+            <label style={LABEL_S}>Contato principal de relacionamento <span style={{ textTransform: 'none', letterSpacing: 0 }}>(quem fala com a corretora)</span></label>
+            <input value={form.contato_empresa} onChange={field('contato_empresa')}
+              placeholder={isPJ ? 'Nome de quem responde pela empresa' : 'Ex.: o próprio cliente, cônjuge, procurador…'} style={INPUT_S} />
+          </div>
+
+          {/* §10 (28/07): campos comuns PF/PJ — exclusivos do CRM */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <label style={LABEL_S}>Contato na empresa <span style={{ textTransform: 'none', letterSpacing: 0 }}>(quem fala com a corretora)</span></label>
-              <input value={form.contato_empresa} onChange={field('contato_empresa')} placeholder="Nome de quem responde pela empresa" style={INPUT_S} />
+              <label style={LABEL_S}>Nome do negócio <span style={{ textTransform: 'none', letterSpacing: 0 }}>(só CRM)</span></label>
+              <input value={form.nome_negocio} onChange={field('nome_negocio')} placeholder="Nome fantasia / atividade do cliente" style={INPUT_S} />
             </div>
-          )}
+            <div>
+              <label style={LABEL_S}>Detalhes do produto <span style={{ textTransform: 'none', letterSpacing: 0 }}>(só CRM)</span></label>
+              <input value={form.produto_detalhes} onChange={field('produto_detalhes')} placeholder="Coberturas, particularidades…" style={INPUT_S} />
+            </div>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>

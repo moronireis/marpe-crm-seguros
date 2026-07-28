@@ -1,72 +1,15 @@
 import type { APIRoute } from 'astro';
 import { requireAdmin } from '../../../lib/api-auth';
 import { createServerClient } from '../../../lib/supabase-server';
-import { getInstanceToken } from '../../../lib/whatsapp/instance';
+import { fetchProfilePhoto } from '../../../lib/whatsapp/photos';
 
 export const prerender = false;
 
-const UAZAPI_URL = import.meta.env.UAZAPI_URL || '';
-
-// Attempt to fetch a profile picture URL from UazapiGO for a given phone number.
-// Tries multiple endpoint patterns — UazapiGO versions differ.
-// 27/07: o token é resolvido DENTRO da função — no topo do módulo viraria um
-// top-level await, resolvido uma vez por lambda, e uma troca de token só valeria
-// depois que o lambda reciclasse.
-async function fetchProfilePic(phone: string): Promise<string | null> {
-  const UAZAPI_TOKEN = await getInstanceToken();
-  const endpoints = [
-    // Pattern 1: POST /contacts/profile-picture
-    async () => {
-      const r = await fetch(`${UAZAPI_URL}/contacts/profile-picture?token=${UAZAPI_TOKEN}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number: phone }),
-      });
-      if (!r.ok) return null;
-      const d = await r.json();
-      return d?.profilePicUrl || d?.url || d?.image || d?.photo || null;
-    },
-    // Pattern 2: GET /contact/profile-picture?token=&number=
-    async () => {
-      const r = await fetch(`${UAZAPI_URL}/contact/profile-picture?token=${UAZAPI_TOKEN}&number=${encodeURIComponent(phone)}`);
-      if (!r.ok) return null;
-      const d = await r.json();
-      return d?.profilePicUrl || d?.url || d?.image || d?.photo || null;
-    },
-    // Pattern 3: POST /contact/get (returns full contact info including photo)
-    async () => {
-      const r = await fetch(`${UAZAPI_URL}/contact/get?token=${UAZAPI_TOKEN}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number: phone }),
-      });
-      if (!r.ok) return null;
-      const d = await r.json();
-      return d?.profilePicUrl || d?.pictureUrl || d?.photo || d?.image || null;
-    },
-    // Pattern 4: POST /contacts/get
-    async () => {
-      const r = await fetch(`${UAZAPI_URL}/contacts/get?token=${UAZAPI_TOKEN}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number: phone }),
-      });
-      if (!r.ok) return null;
-      const d = await r.json();
-      return d?.profilePicUrl || d?.pictureUrl || d?.photo || d?.image || null;
-    },
-  ];
-
-  for (const attempt of endpoints) {
-    try {
-      const url = await attempt();
-      if (url && typeof url === 'string' && url.startsWith('http')) return url;
-    } catch {
-      // try next
-    }
-  }
-  return null;
-}
+// Revisão 28/07 (Inbox #4 — "verificar se a função Sincronizar está funcionando"):
+// NÃO estava. Este endpoint tentava 4 rotas especulativas da UazapiGO
+// (/contacts/profile-picture, /contact/get, ...) — probe de 28/07: todas 405.
+// A rota real é POST /chat/details { number } → { image, imagePreview }, validada
+// em 14/07 e centralizada em lib/whatsapp/photos.ts. Agora usa a lib.
 
 // POST /api/admin/sync-photos
 // Body: { limit?: number, offset?: number } — defaults to 50 contacts per batch
@@ -113,7 +56,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     const normalized = digits.startsWith('55') ? digits : `55${digits}`;
 
     try {
-      const picUrl = await fetchProfilePic(normalized);
+      const picUrl = await fetchProfilePhoto(normalized);
       if (picUrl) {
         await sb
           .from('marpe_contacts')

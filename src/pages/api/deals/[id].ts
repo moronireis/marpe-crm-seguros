@@ -99,12 +99,29 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
 
   // Log stage change activity
   if (body.stage_id && body.stage_id !== oldStageId) {
+    // §7.2 (28/07): o PDF pede o histórico "de → para" com quem alterou. A
+    // descrição era só "Etapa alterada" e o metadata guardava IDs — a aba
+    // Atividades mostrava um evento mudo. Agora resolve os NOMES das etapas.
+    const stageIds = [oldStageId, body.stage_id].filter(Boolean) as string[];
+    const { data: stageRows } = await sb
+      .from('marpe_funnel_stages')
+      .select('id, name')
+      .in('id', stageIds);
+    const nameOf = (sid: string | null) =>
+      stageRows?.find(s => s.id === sid)?.name || null;
+    const fromName = nameOf(oldStageId);
+    const toName = nameOf(body.stage_id);
+
     await sb.from('marpe_deal_activities').insert({
       deal_id: id,
       user_id: profile.id,
       type: 'stage_change',
-      description: `Etapa alterada`,
-      metadata: { from_stage: oldStageId, to_stage: body.stage_id },
+      description: fromName && toName
+        ? `Etapa alterada: ${fromName} → ${toName}`
+        : toName
+          ? `Etapa alterada para ${toName}`
+          : 'Etapa alterada',
+      metadata: { from_stage: oldStageId, to_stage: body.stage_id, from_name: fromName, to_name: toName },
     });
 
     // Fire automations async (don't block response)
