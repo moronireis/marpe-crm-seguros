@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import CorpIntegrationReport from './CorpIntegrationReport';
 
 interface User { id: string; full_name: string; email: string; phone: string | null; role: string; is_active: boolean; }
 interface WaStatus { connected: boolean; status: string; phone: string | null; name: string | null; error?: string; }
@@ -1229,6 +1230,7 @@ export default function ConfigView() {
                 { label: 'Sync completo', type: 'all' },
                 { label: 'Só clientes', type: 'clientes' },
                 { label: 'Só negócios', type: 'negocios' },
+                { label: 'Só renovações', type: 'renovacoes' },
               ].map(({ label, type }) => (
                 <button key={type} onClick={() => triggerSync(type)} disabled={syncingCorp}
                   style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500, opacity: syncingCorp ? 0.5 : 1 }}>
@@ -1268,8 +1270,18 @@ export default function ConfigView() {
               </div>
             ))}
 
-            {/* Revisão 28/07 (PDF Sync §2-§5): "puxar/listar os cadastros do Corp para consulta" */}
-            <CorpCadastrosConsulta />
+            {/* R6 (30/07): a consulta virou o módulo Cadastros no menu */}
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Cadastros do Corp</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>A consulta de seguradoras, ramos, produtores e demais cadastros virou o módulo Cadastros, no menu lateral.</div>
+              </div>
+              <a href="/cadastros" style={{ padding: '8px 16px', borderRadius: 9, background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600, textDecoration: 'none', flexShrink: 0 }}>Abrir Cadastros</a>
+            </div>
+
+            {/* 30/07: aba de atenção — relatório da integração Corp (o que sincroniza,
+                o que não, e as pendências para cobrar da Agia por e-mail) */}
+            <CorpIntegrationReport />
           </div>
         )}
 
@@ -1477,74 +1489,6 @@ function ImportChatsCard() {
           </>
         ) : 'Importar conversas'}
       </button>
-    </div>
-  );
-}
-
-// ─── Revisão 28/07 · PDF Sync §2-§5: cadastros do Corp para consulta ──────────
-// "Permitir puxar/listar os cadastros do Corp para consulta" — leitura, direto
-// dos lookups. Canais de venda, grupos de produtores e bancos NÃO têm rota na
-// CorpAPI (probe S0; cobrado da Agia) — a nota abaixo registra isso para o
-// cliente não procurar o que não existe.
-function CorpCadastrosConsulta() {
-  const [lookups, setLookups] = useState<any>(null);
-  const [open, setOpen] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch('/api/corp/lookups').then(r => r.json()).then(setLookups).catch(() => {});
-  }, []);
-
-  const grupos: Array<{ key: string; label: string; rows: Array<{ a: string; b?: string }> }> = lookups ? [
-    { key: 'seguradoras', label: `Seguradoras (${(lookups.seguradoras || []).length})`,
-      rows: (lookups.seguradoras || []).map((x: any) => ({ a: `${x.codigo} — ${x.nome}`, b: x.abreviatura })) },
-    { key: 'ramos', label: `Ramos (${(lookups.ramos || []).length})`,
-      rows: (lookups.ramos || []).map((x: any) => ({ a: `${x.codigo} — ${x.nome}`, b: x.abreviatura })) },
-    { key: 'produtores', label: `Produtores (${(lookups.produtores || []).length})`,
-      rows: (lookups.produtores || []).map((x: any) => ({ a: `${x.codigo} — ${x.nome}` })) },
-    { key: 'agentes', label: `Agentes (${(lookups.agentes || []).length})`,
-      rows: (lookups.agentes || []).map((x: any) => ({ a: `${x.codigo} — ${x.nome}` })) },
-    { key: 'profissoes', label: `Profissões (${(lookups.profissoes || []).length})`,
-      rows: (lookups.profissoes || []).map((x: any) => ({ a: `${x.codigo} — ${x.profissao}` })) },
-    { key: 'estado_civil', label: `Estados civis (${(lookups.estados_civis || []).length})`,
-      rows: (lookups.estados_civis || []).map((x: any) => ({ a: `${x.codigo} — ${x.descricao}` })) },
-    { key: 'escolaridade', label: `Escolaridades (${(lookups.escolaridades || []).length})`,
-      rows: (lookups.escolaridades || []).map((x: any) => ({ a: `${x.codigo} — ${x.descricao}` })) },
-  ] : [];
-
-  return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginTop: 16 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Cadastros do Corp (consulta)</div>
-      <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 12 }}>
-        Listas lidas direto do Corp, somente leitura — como estão lá.
-        {' '}<span style={{ color: 'var(--text-secondary)' }}>Canais de venda, grupos de produtores e bancos não são expostos pela API do Corp (já solicitado à Agia).</span>
-      </p>
-
-      {!lookups ? (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Carregando…</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {grupos.map(g => (
-            <div key={g.key} style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-              <button onClick={() => setOpen(open === g.key ? null : g.key)}
-                style={{ width: '100%', textAlign: 'left', padding: '9px 13px', background: open === g.key ? 'rgba(59,130,246,0.08)' : 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                {g.label}
-                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{open === g.key ? '▾' : '▸'}</span>
-              </button>
-              {open === g.key && (
-                <div style={{ maxHeight: 260, overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
-                  {g.rows.map((r, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 13px', fontSize: 12, color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.a}</span>
-                      {r.b && <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{r.b}</span>}
-                    </div>
-                  ))}
-                  {g.rows.length === 0 && <div style={{ padding: '8px 13px', fontSize: 12, color: 'var(--text-muted)' }}>Nada retornado pelo Corp.</div>}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

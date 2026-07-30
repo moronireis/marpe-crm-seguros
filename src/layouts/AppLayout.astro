@@ -30,6 +30,8 @@ const navItems = [
   { id: 'automacoes', label: 'Automações', href: '/automacoes', icon: 'bolt' },
   { id: 'templates', label: 'Templates', href: '/templates', icon: 'template' },
   { id: 'links', label: 'Links', href: '/links', icon: 'link' },
+  // R6 (report 29/07): módulo de Cadastros do Corp no painel frontal
+  { id: 'cadastros', label: 'Cadastros', href: '/cadastros', icon: 'folder' },
 ];
 ---
 <html lang="pt-BR">
@@ -80,6 +82,7 @@ const navItems = [
             {item.icon === 'send' && <><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></>}
             {item.icon === 'bolt' && <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />}
             {item.icon === 'link' && <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>}
+            {item.icon === 'folder' && <><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></>}
             {item.icon === 'template' && <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>}
           </svg>
           {item.id === 'inbox' && <span class="nav-badge nav-badge--red" id="badge-inbox" aria-label="conversas não lidas"></span>}

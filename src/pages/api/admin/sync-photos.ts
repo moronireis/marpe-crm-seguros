@@ -28,10 +28,15 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   // Fetch contacts that have a WhatsApp phone number but no photo yet
   // Only individual contacts (not groups — group JIDs end in @g.us)
+  // R4 (report 29/07): sem o corte por idade, contatos tentados numa instância
+  // ANTIGA (photo_synced_at de semanas atrás) nunca eram re-tentados — e foto de
+  // WhatsApp muda. Re-tenta quem nunca foi tentado OU foi tentado há mais de 30d.
+  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
   const { data: contacts, error } = await sb
     .from('marpe_contacts')
     .select('id, phone, photo_url')
     .is('photo_url', null)
+    .or(`photo_synced_at.is.null,photo_synced_at.lt.${cutoff}`)
     .not('phone', 'ilike', '%@g.us%')
     .not('phone', 'is', null)
     .range(offset, offset + batchLimit - 1)
@@ -60,10 +65,16 @@ export const POST: APIRoute = async ({ locals, request }) => {
       if (picUrl) {
         await sb
           .from('marpe_contacts')
-          .update({ photo_url: picUrl, updated_at: new Date().toISOString() })
+          .update({ photo_url: picUrl, photo_synced_at: new Date().toISOString(), updated_at: new Date().toISOString() })
           .eq('id', contact.id);
         updated++;
       } else {
+        // marca a tentativa — sem isso o mesmo contato sem foto visível voltava
+        // em todo lote e o botão nunca "terminava"
+        await sb.from('marpe_contacts')
+          .update({ photo_synced_at: new Date().toISOString() })
+          .eq('id', contact.id)
+          .then(null, () => {});
         skipped++;
       }
     } catch {

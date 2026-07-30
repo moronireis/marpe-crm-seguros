@@ -47,39 +47,35 @@ function resolveMediaUrl(m: Message): string | null {
 function MessageContent({ m }: { m: Message }) {
   const { content_type, body, media_mime } = m;
   const src = resolveMediaUrl(m);
+  // Report 29/07 ("tarja branca"): o onError antigo escondia a mídia MUTANDO o
+  // DOM — e o poll de 3s re-renderizava com os estilos do JSX, ressuscitando o
+  // <img>/<video> quebrado a cada ciclo (a faixa branca sobre as bolhas).
+  // Falha agora é ESTADO React: falhou uma vez, vira fallback definitivo — e o
+  // estado persiste porque a linha é keyed por m.id.
+  const [mediaBroken, setMediaBroken] = useState(false);
+
+  const brokenNote = (label: string) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      {label}
+    </div>
+  );
 
   if (content_type === 'image') {
     return (
       <div>
-        {src ? (
-          <div>
+        {!src ? brokenNote('Imagem indisponível')
+          : mediaBroken ? brokenNote('Imagem expirada — peça para reenviar')
+          : (
             <a href={src} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
               <img
                 src={src}
                 alt={body || 'Imagem'}
                 style={{ maxWidth: 260, width: '100%', borderRadius: 10, display: 'block', cursor: 'pointer', objectFit: 'cover' }}
-                onError={e => {
-                  // Proxy respondeu 410 (mídia expirada na UazapiGO) ou rede falhou —
-                  // mostra estado terminal claro em vez de link morto (fix #21)
-                  const img = e.target as HTMLImageElement;
-                  const anchor = img.parentElement as HTMLElement | null;
-                  if (anchor) anchor.style.display = 'none';
-                  const fallback = anchor?.nextElementSibling as HTMLElement | null;
-                  if (fallback) fallback.style.display = 'flex';
-                }}
+                onError={() => setMediaBroken(true)}
               />
             </a>
-            <div style={{ display: 'none', alignItems: 'center', gap: 6, padding: '6px 0', color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-              Imagem expirada — peça para reenviar
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            Imagem indisponível
-          </div>
-        )}
+          )}
         {body && <div style={{ marginTop: 5, fontSize: 13, lineHeight: 1.4 }}>{body}</div>}
       </div>
     );
@@ -97,37 +93,27 @@ function MessageContent({ m }: { m: Message }) {
   if (content_type === 'video') {
     return (
       <div>
-        {src ? (
+        {!src ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            Vídeo indisponível
+          </div>
+        ) : mediaBroken ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            Vídeo expirado — peça para reenviar
+          </div>
+        ) : (
           <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000', maxWidth: 280 }}>
-            {/* S1 #8 (27/07): o `<source type=...>` fazia o navegador recusar o vídeo
-                quando o mime gravado não batia com o real (ex.: proxy devolve video/webm
-                e tínhamos gravado video/mp4) — e o onError pintava "expirado" num vídeo
-                que estava bom. Agora o src vai direto no elemento (o navegador detecta
-                o tipo) e o fallback só aparece se o próprio media element registrar erro. */}
+            {/* S1 #8: src direto no elemento (o <source type> recusava mime divergente);
+                29/07: erro vira estado — sem mutação de DOM que o poll ressuscita */}
             <video
               controls
               preload="metadata"
               src={src}
               style={{ width: '100%', display: 'block', maxHeight: 200 }}
-              onError={(e) => {
-                const el = e.currentTarget;
-                // MEDIA_ERR_SRC_NOT_SUPPORTED (4) / MEDIA_ERR_NETWORK (2) = realmente morreu.
-                // Sem el.error é evento transitório — não marca como expirado.
-                if (!el.error) return;
-                el.style.display = 'none';
-                const fallback = el.nextElementSibling as HTMLElement | null;
-                if (fallback) fallback.style.display = 'flex';
-              }}
+              onError={(e) => { if (e.currentTarget.error) setMediaBroken(true); }}
             />
-            <div style={{ display: 'none', padding: '10px 12px', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-              Vídeo expirado — peça para reenviar
-            </div>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-            Vídeo indisponível
           </div>
         )}
         {body && <div style={{ marginTop: 5, fontSize: 13 }}>{body}</div>}
@@ -180,9 +166,9 @@ function MessageContent({ m }: { m: Message }) {
   if (content_type === 'sticker') {
     return (
       <div>
-        {src ? (
+        {src && !mediaBroken ? (
           <img src={src} alt="Sticker" style={{ maxWidth: 120, maxHeight: 120, display: 'block' }}
-            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            onError={() => setMediaBroken(true)} />
         ) : (
           <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>Sticker</span>
         )}
@@ -698,10 +684,20 @@ export default function InboxView() {
   const lastMsgId = messages[messages.length - 1]?.id;
   const scrolledContactRef = useRef<string | null>(null);
   useEffect(() => {
+    // Report 29/07: o fix de 28/07 marcava a ref no PRIMEIRO disparo — que roda
+    // antes das mensagens carregarem (lastMsgId vazio). Quando elas chegavam, o
+    // efeito já achava que o chat não era novo → rolagem suave pela conversa
+    // inteira, de novo. A ref só marca quando há mensagens carregadas (ou o
+    // load terminou vazio).
+    if (loadingMsgs) return;
     const isNewChat = scrolledContactRef.current !== activeContactId;
+    if (messages.length === 0) {
+      if (!loadingMsgs) scrolledContactRef.current = activeContactId;
+      return;
+    }
     scrolledContactRef.current = activeContactId;
     msgEndRef.current?.scrollIntoView({ behavior: isNewChat ? 'auto' : 'smooth' });
-  }, [lastMsgId, activeContactId]);
+  }, [lastMsgId, activeContactId, loadingMsgs, messages.length]);
 
   // Poll for new messages every 3s — compares last message ID, not count.
   // #30: mescla apenas as mensagens NOVAS no fim, preservando janelas antigas
@@ -799,6 +795,45 @@ export default function InboxView() {
     () => contacts.reduce((n, c) => n + ((c as any).conv_status === 'atendimento' ? 1 : 0), 0),
     [contacts]
   );
+
+  // R3 (report 29/07): contadores por aba vêm do SERVIDOR — cada aba busca uma
+  // fonte diferente (grupos ficam fora das outras), então contar só o que está
+  // carregado nunca "contabiliza tudo". Fallback local até a primeira resposta.
+  const [serverBadges, setServerBadges] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    const load = () => {
+      fetch('/api/contacts/badges')
+        .then(r => r.json())
+        .then(d => { if (d && typeof d.naolidas === 'number') setServerBadges(d); })
+        .catch(() => {});
+    };
+    load();
+    const iv = setInterval(load, 15000);
+    return () => clearInterval(iv);
+  }, []);
+  const tabBadges: Record<InboxTab, number> = {
+    conversas: serverBadges?.conversas ?? 0,
+    grupos: serverBadges?.grupos ?? 0,
+    naolidas: serverBadges?.naolidas ?? unreadCount,
+    finalizadas: serverBadges?.finalizadas ?? closedCount,
+    atendimento: serverBadges?.atendimento ?? atendimentoCount,
+  };
+
+  // R3: "ao CLICAR em um chat, ele move para Atendimento e fica lá até ser
+  // finalizado" (critério atualizado pelo Tiago em 29/07 — antes era só ao
+  // responder). Finalizada aberta para leitura NÃO reabre; grupo não entra no
+  // funil de atendimento.
+  function moveToAtendimentoOnOpen(c: Contact) {
+    const status = (c as any).conv_status;
+    const isGroup = (c as any).source === 'whatsapp_group';
+    if (isGroup || status === 'closed' || status === 'atendimento') return;
+    patchContactLocal(c.id, { conv_status: 'atendimento' });
+    fetch(`/api/contacts/${c.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conv_status: 'atendimento' }),
+    }).catch(() => patchContactLocal(c.id, { conv_status: status }));
+  }
 
   // Populate editable fields when active contact changes
   // (activeContact?.id no deps: cobre o caso do contato pinado chegar depois via fetch)
@@ -1041,26 +1076,30 @@ export default function InboxView() {
           </div>
         </div>
 
-        {/* S1 #9: funil de atendimento em abas — Conversas · Grupos · Não lidas · Finalizadas */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
+        {/* S1 #9 + R2 (report 29/07): abas do funil em barra ROLÁVEL — as 5 abas
+            com contadores estouravam os 320px e sobrepunham os rótulos. Cada aba
+            tem largura própria (flex none) e a barra rola na horizontal, padrão
+            WhatsApp; a aba ativa se traz para a área visível. */}
+        <div className="hide-scrollbar" style={{ display: 'flex', borderBottom: '1px solid var(--hairline)', flexShrink: 0, overflowX: 'auto' }}>
           {(['conversas', 'grupos', 'naolidas', 'finalizadas', 'atendimento'] as const).map(tab => {
-            const badge = tab === 'naolidas' ? unreadCount : tab === 'finalizadas' ? closedCount : tab === 'atendimento' ? atendimentoCount : 0;
+            const badges = tabBadges[tab] || 0;
             const on = activeTab === tab;
             return (
               <button key={tab} onClick={() => setActiveTab(tab)} title={TAB_LABELS[tab]}
+                ref={el => { if (on && el) el.scrollIntoView({ inline: 'nearest', block: 'nearest' }); }}
                 style={{
-                  flex: 1, minWidth: 0, padding: '10px 2px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                  flex: '0 0 auto', padding: '10px 11px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
                   background: 'transparent', border: 'none', cursor: 'pointer',
                   borderBottom: `2px solid ${on ? 'var(--accent)' : 'transparent'}`,
                   color: on ? 'var(--accent-light)' : 'var(--text-muted)',
                   transition: 'color 0.18s, border-color 0.18s',
                   letterSpacing: '0.02em',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                  display: 'flex', alignItems: 'center', gap: 4,
                   whiteSpace: 'nowrap',
                 }}>
                 {TAB_LABELS[tab]}
-                {badge > 0 && (
-                  <span style={{ fontSize: 9, fontWeight: 700, background: on ? 'var(--accent)' : 'var(--field-bg)', color: on ? '#fff' : 'var(--text-muted)', borderRadius: 999, padding: '1px 5px', lineHeight: 1.5 }}>{badge}</span>
+                {badges > 0 && (
+                  <span style={{ fontSize: 9, fontWeight: 700, background: on ? 'var(--accent)' : 'var(--field-bg)', color: on ? '#fff' : 'var(--text-muted)', borderRadius: 999, padding: '1px 5px', lineHeight: 1.5 }}>{badges}</span>
                 )}
               </button>
             );
@@ -1113,6 +1152,8 @@ export default function InboxView() {
               setActiveContactId(c.id);
               // S3.5: marca leitura persistida (inbox_read_at) + sessão
               markRead(c.id);
+              // R3 (29/07): abrir o chat já move para Atendimento
+              moveToAtendimentoOnOpen(c);
             }}
               style={{ display: 'flex', gap: 12, padding: '10px 10px', cursor: 'pointer',
                 borderRadius: 12, marginBottom: 2,

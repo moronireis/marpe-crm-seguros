@@ -98,6 +98,21 @@ As rotas existentes devolvem apenas identificação, o que impede reproduzir os 
 
 Existe versão detalhada dessas rotas (ex.: `/seguradora?codigo=`, como há `/cliente?codigo=`)?
 
+## 12. `GET /renovacoes` — retorna 500 (novo, 30/07)
+
+A rota de renovações responde **HTTP 500 "Internal Server Error"** com qualquer combinação de
+parâmetros (testado em 30/07: `dt_ini/dt_fim`, `datini/datfim`, `data_inicial/data_final`, com e
+sem `codfil`, paginação e `periodo`). É a rota que alimentaria o funil de Renovações do CRM —
+enquanto isso, derivamos as renovações localmente a partir das apólices, mas a rota oficial é o
+caminho correto. Poderiam verificar?
+
+## 13. Escrita dos cadastros auxiliares (novo, 30/07)
+
+O CRM ganhou um módulo de Cadastros que hoje é somente consulta, porque a API não tem
+**POST/PUT/DELETE** para seguradoras, ramos, produtores e agentes. Existe previsão de expor a
+escrita desses cadastros? Sem isso, qualquer inclusão feita no CRM não teria como refletir no
+Corp — e o requisito do cliente é que tudo fique sincronizado.
+
 ---
 
 Obrigado!

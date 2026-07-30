@@ -324,3 +324,8 @@ body {
 @media (max-width: 768px) {
   :root { --blur-nav: 14px; --blur-panel: 10px; --blur-modal: 20px; }
 }
+
+/* R2 (report 29/07): barra de abas do Inbox rolável sem scrollbar visível —
+   5 abas + contadores não cabem nos 320px da lista */
+.hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }

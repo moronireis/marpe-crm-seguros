@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { requireAdmin } from '../../../lib/api-auth';
-import { syncAll, syncClientes, syncDocumentos, syncNegocios } from '../../../lib/corp/sync';
+import { syncAll, syncClientes, syncDocumentos, syncNegocios, syncRenovacoes } from '../../../lib/corp/sync';
 
 export const prerender = false;
 
@@ -24,6 +24,9 @@ export const POST: APIRoute = async ({ locals, request }) => {
         break;
       case 'negocios':
         results = [await syncNegocios()];
+        break;
+      case 'renovacoes':
+        results = [await syncRenovacoes()];
         break;
       default:
         results = await syncAll();

@@ -890,6 +890,118 @@ export async function syncContactByCorpId(corpId: number): Promise<{
   return { contact: contactResult, deals: dealsResult, errors: allErrors };
 }
 
+
+/**
+ * Renovações — R (30/07). A rota oficial GET /renovacoes da CorpAPI responde
+ * erro 500 em TODAS as combinações de parâmetros testadas (probe 30/07; cobrado
+ * da Agia — SOLICITACAO v2). Contorno em produção: derivamos as renovações das
+ * APÓLICES já sincronizadas (deals doc_%) com vigência vencendo em até 60 dias.
+ *
+ * Regras:
+ *  - card criado como renov_{codfil}_{nosnum} no funil "Renovações";
+ *  - etapa por proximidade: ≤30 dias → "30 dias", senão → "60 dias";
+ *  - avanço automático SÓ 60→30; card movido à mão nunca é puxado de volta;
+ *  - heurística "já renovada": se existe outra apólice do MESMO contato e ramo
+ *    começando perto/depois do fim desta (inivig ≥ fimvig − 15d), não cria;
+ *  - quando a Agia corrigir o /renovacoes, esta função passa a usar a rota.
+ */
+export async function syncRenovacoes(): Promise<SyncResult> {
+  const sb = createServerClient();
+  const result: SyncResult = { type: 'renovacoes', created: 0, updated: 0, skipped: 0, errors: [] };
+
+  const { data: funil } = await sb.from('marpe_funnels').select('id').ilike('name', 'renova%').maybeSingle();
+  if (!funil?.id) { result.errors.push('Funil Renovações não encontrado'); return result; }
+  const { data: stages } = await sb.from('marpe_funnel_stages')
+    .select('id, name, sort_order, is_terminal').eq('funnel_id', funil.id).order('sort_order');
+  const stage60 = stages?.find(st => st.name.includes('60'))?.id;
+  const stage30 = stages?.find(st => st.name.includes('30'))?.id;
+  if (!stage60 || !stage30) { result.errors.push('Etapas 60/30 dias não encontradas no funil Renovações'); return result; }
+
+  const hoje = new Date();
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const lim60 = new Date(hoje.getTime() + 60 * 86400000);
+
+  // Apólices vencendo na janela
+  const { data: docs, error: docErr } = await sb.from('marpe_deals')
+    .select('id, corp_id, contact_id, title, ramo, seguradora, apolice, premio, comissao_valor, vigencia_inicio, vigencia_fim')
+    .like('corp_id', 'doc_%')
+    .gte('vigencia_fim', iso(hoje))
+    .lte('vigencia_fim', iso(lim60))
+    .not('contact_id', 'is', null)
+    .limit(1000);
+  if (docErr) { result.errors.push(docErr.message); return result; }
+  if (!docs?.length) return result;
+
+  // Heurística "já renovada": maior vigencia_inicio por contato+ramo
+  const keys = [...new Set(docs.map(d => d.contact_id))];
+  const { data: allDocs } = await sb.from('marpe_deals')
+    .select('contact_id, ramo, vigencia_inicio')
+    .like('corp_id', 'doc_%')
+    .in('contact_id', keys)
+    .not('vigencia_inicio', 'is', null)
+    .limit(5000);
+  const maxIni = new Map<string, string>();
+  for (const d of allDocs || []) {
+    const k = `${d.contact_id}|${d.ramo || ''}`;
+    if (!maxIni.has(k) || (d.vigencia_inicio! > maxIni.get(k)!)) maxIni.set(k, d.vigencia_inicio!);
+  }
+
+  // Renovações já existentes
+  const { data: existing } = await sb.from('marpe_deals')
+    .select('id, corp_id, stage_id, vigencia_fim').like('corp_id', 'renov_%');
+  const existingMap = new Map((existing || []).map(d => [d.corp_id, d]));
+
+  for (const doc of docs) {
+    try {
+      const renovId = String(doc.corp_id).replace(/^doc_/, 'renov_');
+      const fim = new Date(doc.vigencia_fim + 'T12:00:00');
+      const dias = Math.ceil((fim.getTime() - hoje.getTime()) / 86400000);
+      const targetStage = dias <= 30 ? stage30 : stage60;
+
+      // já renovada? (nova apólice do mesmo contato+ramo começando perto/depois do fim)
+      const k = `${doc.contact_id}|${doc.ramo || ''}`;
+      const corte = new Date(fim.getTime() - 15 * 86400000).toISOString().slice(0, 10);
+      const jaRenovada = (maxIni.get(k) || '') >= corte && (maxIni.get(k) || '') > (doc.vigencia_inicio || '');
+      if (jaRenovada && !existingMap.has(renovId)) { result.skipped++; continue; }
+
+      const ex = existingMap.get(renovId);
+      if (!ex) {
+        const fimBr = doc.vigencia_fim.split('-').reverse().join('/');
+        const { error } = await sb.from('marpe_deals').insert({
+          corp_id: renovId,
+          funnel_id: funil.id,
+          stage_id: targetStage,
+          contact_id: doc.contact_id,
+          title: `RENOVAÇÃO — ${doc.title || doc.ramo || renovId}`,
+          ramo: doc.ramo, seguradora: doc.seguradora, apolice: doc.apolice,
+          premio: doc.premio, comissao_valor: doc.comissao_valor,
+          vigencia_inicio: doc.vigencia_inicio, vigencia_fim: doc.vigencia_fim,
+          deal_type: 'renovacao',
+          next_action_date: doc.vigencia_fim,
+          next_action: `Renovar apólice — vence ${fimBr}`,
+          detalhes_corp: { origem: 'derivada_da_apolice', doc_corp_id: doc.corp_id, motivo: 'GET /renovacoes indisponível na CorpAPI (erro 500) — derivado localmente' },
+        });
+        if (error) result.errors.push(`${renovId}: ${error.message}`);
+        else result.created++;
+      } else {
+        const updates: Record<string, any> = {};
+        if (ex.vigencia_fim !== doc.vigencia_fim) updates.vigencia_fim = doc.vigencia_fim;
+        // avanço automático SÓ 60 → 30
+        if (ex.stage_id === stage60 && dias <= 30) updates.stage_id = stage30;
+        if (Object.keys(updates).length) {
+          const { error } = await sb.from('marpe_deals').update(updates).eq('id', ex.id);
+          if (error) result.errors.push(`${renovId}: ${error.message}`);
+          else result.updated++;
+        } else result.skipped++;
+      }
+    } catch (e: any) {
+      result.errors.push(String(e?.message || e).slice(0, 120));
+    }
+  }
+
+  return result;
+}
+
 export async function syncAll(): Promise<SyncResult[]> {
   const sb = createServerClient();
   const startedAt = new Date().toISOString();
@@ -903,6 +1015,7 @@ export async function syncAll(): Promise<SyncResult[]> {
   results.push(await syncDocumentos(datini, datfim));
   results.push(await syncNegocios());
   results.push(await syncSinistros());
+  results.push(await syncRenovacoes());
 
   // Log to marpe_corp_sync_log
   for (const r of results) {

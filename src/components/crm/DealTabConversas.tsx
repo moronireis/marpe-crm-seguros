@@ -41,7 +41,23 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
 
   // Template picker: "/" prefix opens the dropdown (same UX as the inbox)
   const templates = useTemplates();
-  const pickerOpen = text.startsWith('/');
+  // A12 (teste "problema"): a sobretela do "/" ficava presa se o usuário clicasse
+  // fora — pickerOpen derivava só do texto. Agora Esc e clique fora dispensam;
+  // digitar de novo reabre.
+  const [pickerDismissed, setPickerDismissed] = useState(false);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const pickerOpen = text.startsWith('/') && !pickerDismissed;
+  useEffect(() => { setPickerDismissed(false); }, [text]);
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function onDown(e: MouseEvent) {
+      if (composerRef.current && !composerRef.current.contains(e.target as Node)) {
+        setPickerDismissed(true);
+      }
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [pickerOpen]);
   const hasVars = /\{\{\w+\}\}/.test(text);
 
   // #39 (board 22/07): paridade com o Inbox — anexos multi-arquivo + áudio
@@ -381,7 +397,7 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
 
       {/* Send input — textarea expansível + preview de variáveis (item 5) */}
       {contactPhone ? (
-        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0, position: 'relative' }}>
+        <div ref={composerRef} style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0, position: 'relative' }}>
           <TemplateDropdown
             visible={pickerOpen}
             filter={pickerOpen ? text.slice(1).toLowerCase() : ''}
@@ -453,7 +469,7 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
               value={text}
               onChange={e => { setText(e.target.value); resizeComposer(); }}
               onKeyDown={e => {
-                if (e.key === 'Escape' && pickerOpen) { setText(''); return; }
+                if (e.key === 'Escape' && pickerOpen) { setPickerDismissed(true); return; }
                 if (e.key === 'Enter' && !e.shiftKey && !pickerOpen) { e.preventDefault(); handleSend(); }
               }}
               placeholder={attach ? 'Legenda (opcional)…' : 'Digite / para templates ou mensagem...'}
