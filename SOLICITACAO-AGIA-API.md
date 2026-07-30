@@ -4,6 +4,7 @@
 > Atualizado em 2026-07-13 (checkpoint 10/07): adicionado o item 3 — lookups de campanhas e bases de cálculo.
 > **v2 — 2026-07-27**: rodada de probes S0 (leitura + escrita em registro descartável) fechou os itens 4 e 5 com
 > evidência empírica e acrescentou os itens 8 a 11 (escrita e cadastros que a API não expõe).
+> **v3 — 2026-07-30**: + item 12 (GET /renovacoes em 500) e item 13 (escrita dos cadastros p/ o módulo Cadastros). Resumo executivo: RELATORIO-CORP-API.md.
 > Pronto para o Tiago enviar por e-mail.
 
 ---

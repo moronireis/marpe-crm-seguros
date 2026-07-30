@@ -105,3 +105,13 @@ com comentário do que mudou e como testar).
 - **Tudo que depende da Agia** (PUT /negocio, POST /atendimento, /usuarios, escrita de cadastros,
   parâmetros de repasse, agendamento da próxima ação) — aguardando resposta ao SOLICITACAO-AGIA v2.
 - Histórico de conversas antigo — backup/PITR (Tiago/Cloudfy).
+
+---
+
+## ✅ EXECUTADO — 30/07 (commit b860146, deploy hpm2oatla)
+
+R1-R6 no ar + a auditoria da Corp que virou a espinha dorsal:
+- **R1**: a tarja era `<img>` morto ressuscitado pelo poll (onError mutava DOM) → erro de mídia agora é estado React; fix do scroll corrigido de verdade (ref só marca com mensagens carregadas); A12 fecha com Esc/clique fora.
+- **R2**: barra de abas rolável. **R3**: abrir chat → Atendimento + contadores do servidor (`/api/contacts/badges`). **R4**: re-tentativa >30d no botão + passe forçado (476 re-tentados na instância nova → 1 foto = privacidade comprovada). **R5**: prefs já cobria tudo — respondido com evidência. **R6**: módulo `/cadastros` no menu; CRUD = item 13 da Agia.
+- **CORP**: painel "Relatório da integração" em Config > Corp (fonte `lib/corp/integration-status.ts`) + `RELATORIO-CORP-API.md` (e-mail pronto, 12 pendências) + SOLICITACAO v3 (itens 12-13). **GAP fechado**: `syncRenovacoes` derivado das apólices (rota oficial em 500) → **funil Renovações populado com 295 cards**. GAP mapeado: parcelas existem no `/documento` (nossa próxima leva).
+- u4-status: 6 chamados respondidos (análise), chamado-relatório da integração criado, bloqueio novo (/renovacoes 500), 8 itens, entrega 30/07, fase atualizada.
