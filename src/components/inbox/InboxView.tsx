@@ -1076,25 +1076,23 @@ export default function InboxView() {
           </div>
         </div>
 
-        {/* S1 #9 + R2 (report 29/07): abas do funil em barra ROLÁVEL — as 5 abas
-            com contadores estouravam os 320px e sobrepunham os rótulos. Cada aba
-            tem largura própria (flex none) e a barra rola na horizontal, padrão
-            WhatsApp; a aba ativa se traz para a área visível. */}
-        <div className="hide-scrollbar" style={{ display: 'flex', borderBottom: '1px solid var(--hairline)', flexShrink: 0, overflowX: 'auto' }}>
+        {/* Report 30/07 [85b50d6c]: rolagem horizontal nas abas escondia Finalizadas
+            e Atendimento — o Tiago quer os estágios TODOS visíveis no bloco. As 5
+            abas agora quebram em duas linhas fixas (3 + 2), sem rolagem. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
           {(['conversas', 'grupos', 'naolidas', 'finalizadas', 'atendimento'] as const).map(tab => {
             const badges = tabBadges[tab] || 0;
             const on = activeTab === tab;
             return (
               <button key={tab} onClick={() => setActiveTab(tab)} title={TAB_LABELS[tab]}
-                ref={el => { if (on && el) el.scrollIntoView({ inline: 'nearest', block: 'nearest' }); }}
                 style={{
-                  flex: '0 0 auto', padding: '10px 11px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                  flex: '1 1 auto', minWidth: '31%', padding: '9px 4px', fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
                   background: 'transparent', border: 'none', cursor: 'pointer',
-                  borderBottom: `2px solid ${on ? 'var(--accent)' : 'transparent'}`,
+                  borderBottom: `2px solid ${on ? 'var(--accent)' : 'var(--border-subtle)'}`,
                   color: on ? 'var(--accent-light)' : 'var(--text-muted)',
                   transition: 'color 0.18s, border-color 0.18s',
-                  letterSpacing: '0.02em',
-                  display: 'flex', alignItems: 'center', gap: 4,
+                  letterSpacing: '0.01em',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
                   whiteSpace: 'nowrap',
                 }}>
                 {TAB_LABELS[tab]}
