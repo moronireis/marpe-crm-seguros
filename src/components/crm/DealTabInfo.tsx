@@ -34,6 +34,8 @@ interface InfoLookups {
   ramos?: { codigo: number; nome: string; abreviatura?: string }[];
   campanhas: string[];
   campanhas_cod?: number[];
+  /** 01/08: derivadas do próprio CRM — a CorpAPI não tem rota de corretoras */
+  corretoras?: string[];
   bases_repasse?: number[];
 }
 
@@ -95,6 +97,8 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
   const [lookups, setLookups] = useState<InfoLookups | null>(null);
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([]);
   const [campanhaLivre, setCampanhaLivre] = useState(false);
+  // Chamado [c04cbe65]: Corretora Atual vira seleção, com escape para digitar
+  const [corretoraLivre, setCorretoraLivre] = useState(false);
 
   // Pick-lists do Corp + usuários ao entrar no modo edição (lookups cacheia 10 min)
   useEffect(() => {
@@ -161,6 +165,7 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
       next_action_date: deal.next_action_date || '',
     });
     setCampanhaLivre(false);
+    setCorretoraLivre(false);
   }, [deal]);
 
   function field(key: string) {
@@ -391,17 +396,38 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
         </label>
         {form.ja_possui_produto && (
           <>
+            {/* Chamado [c04cbe65] (01/08): seleção com as seguradoras do Corp */}
             <div style={{ marginTop: 8 }}>
               <label style={s.label}>Seguradora Atual</label>
-              <input value={form.seguradora_atual} onChange={field('seguradora_atual')} style={s.input} />
+              {corpSelect('seguradora_atual', lookups?.seguradoras, 'Ex: Porto Seguro')}
             </div>
             <div style={{ marginTop: 8 }}>
               <label style={s.label}>Fim de Vigência Atual</label>
               <input type="date" value={form.vigencia_atual_fim} onChange={field('vigencia_atual_fim')} style={s.input} />
             </div>
+            {/* Chamado [c04cbe65]: a CorpAPI não tem cadastro de corretoras — a
+                lista vem do que já foi usado no CRM, com "Outra" para digitar
+                (concorrente novo aparece o tempo todo) */}
             <div style={{ marginTop: 8 }}>
               <label style={s.label}>Corretora Atual</label>
-              <input value={form.corretora_atual} onChange={field('corretora_atual')} style={s.input} />
+              <select
+                value={corretoraLivre ? '__livre' : (form.corretora_atual || '')}
+                onChange={e => {
+                  if (e.target.value === '__livre') { setCorretoraLivre(true); setForm(f => ({ ...f, corretora_atual: '' })); }
+                  else { setCorretoraLivre(false); setForm(f => ({ ...f, corretora_atual: e.target.value })); }
+                }}
+                style={s.select}
+              >
+                <option value="">—</option>
+                {form.corretora_atual && !corretoraLivre && !(lookups?.corretoras || []).includes(form.corretora_atual) && (
+                  <option value={form.corretora_atual}>{form.corretora_atual} (atual)</option>
+                )}
+                {(lookups?.corretoras || []).map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="__livre">Outra (digitar)...</option>
+              </select>
+              {corretoraLivre && (
+                <input value={form.corretora_atual} onChange={field('corretora_atual')} placeholder="Nome da corretora" autoFocus style={{ ...s.input, marginTop: 6 }} />
+              )}
             </div>
           </>
         )}

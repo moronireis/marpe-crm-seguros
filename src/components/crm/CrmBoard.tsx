@@ -194,6 +194,8 @@ interface CorpLookups {
   campanhas_cod?: number[];
   /** Códigos de base de cálculo do repasse (campo_base_r) — 5 é o default do Corp */
   bases_repasse?: number[];
+  /** Corretoras concorrentes já usadas no CRM — a CorpAPI não tem cadastro de corretoras */
+  corretoras?: string[];
   tipos: { codigo: number; nome: string; deal_type: string }[];
 }
 const FALLBACK_RAMOS = ['auto', 'vida', 'residencial', 'empresarial', 'equipamento', 'consorcio', 'financiamento', 'rcge'];
@@ -615,6 +617,8 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
   const [lookups, setLookups] = useState<CorpLookups | null>(null);
   // Campanha: '' | 'nome:X' | 'cod:16' | '__livre' (texto em form.campanha)
   const [campanhaChoice, setCampanhaChoice] = useState('');
+  // Chamado [c598e787] (01/08): Corretora Atual vira seleção, com escape p/ digitar
+  const [corretoraLivre, setCorretoraLivre] = useState(false);
   // Vr. Comissão/Vr. Repasse: auto-calcula de Prêmio × % até o usuário digitar
   // manualmente no campo (issue #14)
   const valorEdited = useRef({ comissao: false, repasse: false });
@@ -943,17 +947,44 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
           </div>
           {form.ja_possui_produto && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, paddingLeft: 4, borderLeft: '2px solid rgba(59,130,246,0.2)' }}>
+              {/* Chamado [c598e787] (01/08): seleção com as seguradoras do Corp */}
               <div>
                 <label style={LABEL_S}>Seguradora Atual</label>
-                <input value={form.seguradora_atual} onChange={field('seguradora_atual')} style={INPUT_S} />
+                <select value={form.seguradora_atual} onChange={field('seguradora_atual')}
+                  disabled={lookups === null}
+                  style={{ ...INPUT_S, cursor: lookups === null ? 'wait' : 'pointer', opacity: lookups === null ? 0.7 : 1 }}>
+                  <option value="">{lookups === null ? 'Carregando…' : '— Selecione —'}</option>
+                  {(lookups?.seguradoras || []).map(sg => <option key={sg.codigo} value={sg.nome}>{sg.nome}</option>)}
+                  {form.seguradora_atual && lookups && !lookups.seguradoras.some(sg => sg.nome === form.seguradora_atual) && (
+                    <option value={form.seguradora_atual}>{form.seguradora_atual} (atual)</option>
+                  )}
+                </select>
               </div>
               <div>
                 <label style={LABEL_S}>Vig. Atual Fim</label>
                 <input type="date" value={form.vigencia_atual_fim} onChange={field('vigencia_atual_fim')} style={INPUT_S} />
               </div>
+              {/* Chamado [c598e787]: a CorpAPI não tem cadastro de corretoras — a
+                  lista sai do que já foi usado no CRM, com "Outra" para digitar */}
               <div>
                 <label style={LABEL_S}>Corretora Atual</label>
-                <input value={form.corretora_atual} onChange={field('corretora_atual')} style={INPUT_S} />
+                <select
+                  value={corretoraLivre ? '__livre' : (form.corretora_atual || '')}
+                  onChange={e => {
+                    if (e.target.value === '__livre') { setCorretoraLivre(true); setForm(f => ({ ...f, corretora_atual: '' })); }
+                    else { setCorretoraLivre(false); setForm(f => ({ ...f, corretora_atual: e.target.value })); }
+                  }}
+                  style={{ ...INPUT_S, cursor: 'pointer' }}>
+                  <option value="">— Selecione —</option>
+                  {form.corretora_atual && !corretoraLivre && !(lookups?.corretoras || []).includes(form.corretora_atual) && (
+                    <option value={form.corretora_atual}>{form.corretora_atual} (atual)</option>
+                  )}
+                  {(lookups?.corretoras || []).map(c => <option key={c} value={c}>{c}</option>)}
+                  <option value="__livre">Outra (digitar)...</option>
+                </select>
+                {corretoraLivre && (
+                  <input value={form.corretora_atual} onChange={field('corretora_atual')} placeholder="Nome da corretora" autoFocus style={{ ...INPUT_S, marginTop: 6 }} />
+                )}
               </div>
             </div>
           )}

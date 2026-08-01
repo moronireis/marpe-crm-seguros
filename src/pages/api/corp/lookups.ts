@@ -22,7 +22,7 @@ export const GET: APIRoute = async ({ locals }) => {
   }
 
   const sb = createServerClient();
-  const [ramos, seguradoras, produtores, agentes, profissoes, estadosCivis, escolaridades, campanhasQ, codcampQ, baseQ] = await Promise.allSettled([
+  const [ramos, seguradoras, produtores, agentes, profissoes, estadosCivis, escolaridades, campanhasQ, codcampQ, baseQ, corretorasQ] = await Promise.allSettled([
     listRamos(),
     listSeguradoras(),
     listProdutores(),
@@ -37,6 +37,11 @@ export const GET: APIRoute = async ({ locals }) => {
     // e o Corp resolve o rótulo na interface dele.
     sb.from('marpe_deals').select('codcamp:detalhes_corp->>codcamp').not('detalhes_corp->>codcamp', 'is', null).limit(2000),
     sb.from('marpe_deals').select('base:detalhes_corp->>campo_base_repasse').not('detalhes_corp->>campo_base_repasse', 'is', null).limit(2000),
+    // 01/08 (chamados [c598e787]/[c04cbe65]): "Corretora Atual" precisa virar
+    // seleção. A CorpAPI NÃO tem rota de corretoras (probe 01/08: /corretoras,
+    // /corretora, /corretores, /concorrentes — todas inexistentes), então a lista
+    // é derivada do que já foi cadastrado no próprio CRM, como as campanhas.
+    sb.from('marpe_deals').select('corretora_atual').not('corretora_atual', 'is', null).limit(2000),
   ]);
 
   const ok = <T,>(r: PromiseSettledResult<T>, fallback: T): T =>
@@ -47,6 +52,11 @@ export const GET: APIRoute = async ({ locals }) => {
 
   const codcampRows = (ok(codcampQ, { data: [] } as any) as any)?.data || [];
   const campanhas_cod = [...new Set(codcampRows.map((d: any) => parseInt(d.codcamp)).filter((n: number) => !isNaN(n)))].sort((a: number, b: number) => a - b) as number[];
+
+  const corretoraRows = (ok(corretorasQ, { data: [] } as any) as any)?.data || [];
+  const corretoras = [...new Set(
+    corretoraRows.map((d: any) => String(d.corretora_atual || '').trim()).filter(Boolean)
+  )].sort((a, b) => String(a).localeCompare(String(b), 'pt-BR')) as string[];
 
   const baseRows = (ok(baseQ, { data: [] } as any) as any)?.data || [];
   const basesFound = [...new Set(baseRows.map((d: any) => parseInt(d.base)).filter((n: number) => !isNaN(n)))] as number[];
@@ -63,6 +73,7 @@ export const GET: APIRoute = async ({ locals }) => {
     escolaridades: ok(escolaridades, [] as Awaited<ReturnType<typeof listEscolaridades>>),
     campanhas,
     campanhas_cod,
+    corretoras,
     bases_repasse,
     tipos: [
       { codigo: 1, nome: 'Prospecção', deal_type: 'prospeccao' },
