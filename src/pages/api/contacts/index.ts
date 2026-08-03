@@ -46,7 +46,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
 
   let query = sb
     .from('marpe_contacts')
-    .select('id, name, phone, email, city, corp_id, tags, source, photo_url, inbox_read_at, pinned, conv_status')
+    .select('id, name, phone, email, city, corp_id, tags, source, photo_url, inbox_read_at, pinned, conv_status, active_deal_id')
     .in('id', contactIds);
 
   if (search) {
@@ -65,7 +65,7 @@ export const GET: APIRoute = async ({ locals, url }) => {
 
   // Re-order to match message recency order
   const contactMap = new Map((contacts || []).map((c: any) => [c.id, c]));
-  const ordered = latestByContact
+  const comConversa = latestByContact
     .map(m => {
       const contact = contactMap.get(m.contact_id);
       if (!contact) return null;
@@ -77,8 +77,36 @@ export const GET: APIRoute = async ({ locals, url }) => {
         last_message_at: m.created_at,
       };
     })
-    .filter(Boolean)
-    .slice(offset, offset + limit);
+    .filter(Boolean) as any[];
+
+  const ordered = comConversa.slice(offset, offset + limit);
+
+  // ── Aba Contatos = TODOS os contatos cadastrados (PDF do Marcel, 01/08) ─────
+  // O item 1 do fluxo é explícito: "Contatos — Todos os contatos cadastrados".
+  // Até aqui a lista nascia das MENSAGENS, então quem nunca tinha trocado uma
+  // mensagem simplesmente não existia no Inbox — e é justamente com essa pessoa
+  // que o item 1.1 manda iniciar a conversa. Só entram no fim da lista, depois de
+  // quem tem conversa, e só até completar o `limit` pedido: são 3.496 contatos,
+  // mandar todos repetiria o problema de peso do funil.
+  if (url.searchParams.get('todos') === '1' && ordered.length < limit) {
+    const jaListados = new Set(comConversa.map(c => c.id));
+    let extras = sb
+      .from('marpe_contacts')
+      .select('id, name, phone, email, city, corp_id, tags, source, photo_url, inbox_read_at, pinned, conv_status, active_deal_id')
+      .order('name')
+      .limit(limit - ordered.length + jaListados.size);
+
+    if (search) extras = extras.or(`name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
+    if (sourceFilter) extras = extras.eq('source', sourceFilter);
+    else if (excludeSource) extras = extras.neq('source', excludeSource);
+
+    const { data: semConversa } = await extras;
+    for (const c of semConversa || []) {
+      if (ordered.length >= limit) break;
+      if (jaListados.has(c.id)) continue;
+      ordered.push({ ...c, last_message: null, last_message_direction: null, last_message_at: null });
+    }
+  }
 
   return new Response(JSON.stringify({ contacts: ordered, total: ordered.length }), { status: 200 });
 };

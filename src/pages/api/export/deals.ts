@@ -41,10 +41,11 @@ export const GET: APIRoute = async ({ locals, url }) => {
   let query = sb
     .from('marpe_deals')
     .select(`
-      id, title, ramo, seguradora, premio, comissao_valor, comissao_pct,
+      id, title, ramo, seguradora, premio, iof, premio_final,
+      comissao_valor, comissao_pct, forma_pagamento, parcelas,
       vigencia_inicio, vigencia_fim, deal_type, status_custom, produtor,
       veiculo, placa, next_action, next_action_date, created_at,
-      marpe_contacts ( name, phone, cpf_cnpj, email, city, state, tags ),
+      marpe_contacts!contact_id ( name, phone, cpf_cnpj, email, city, state, tags ),
       marpe_funnel_stages ( name ),
       marpe_funnels ( name )
     `)
@@ -60,9 +61,14 @@ export const GET: APIRoute = async ({ locals, url }) => {
     return new Response(JSON.stringify({ error: error.message }), { status: 500 });
   }
 
+  // 03/08: o relatório de produção usa o prêmio LÍQUIDO (base da comissão) — o final
+  // e o IOF vão junto porque é o que o cliente enxerga (teste B4), mais forma de
+  // pagamento e parcelamento (chamado 5cb84ad8).
   const headers = [
-    'Nome do Contato', 'Telefone', 'Ramo', 'Seguradora',
-    'Prêmio', 'Comissão', 'Vigência Início', 'Vigência Fim',
+    'Negócio', 'Nome do Contato', 'Telefone', 'Ramo', 'Seguradora',
+    'Prêmio líquido', 'IOF', 'Prêmio final', 'Comissão',
+    'Forma de pagamento', 'Parcelamento',
+    'Vigência Início', 'Vigência Fim',
     'Funil', 'Etapa', 'Tipo', 'Status', 'Produtor',
     'Veículo', 'Placa', 'Próxima Ação', 'Data Próxima Ação',
   ];
@@ -81,12 +87,17 @@ export const GET: APIRoute = async ({ locals, url }) => {
     }
 
     return [
-      contact?.name || d.title || '',
+      d.title || '',
+      contact?.name || '',
       contact?.phone || '',
       d.ramo || '',
       d.seguradora || '',
       fmtMoney(d.premio),
+      fmtMoney(d.iof),
+      fmtMoney(d.premio_final ?? d.premio),
       comissao,
+      d.forma_pagamento || '',
+      d.parcelas ? `${d.parcelas}x` : '',
       fmtDate(d.vigencia_inicio),
       fmtDate(d.vigencia_fim),
       funnel?.name || '',

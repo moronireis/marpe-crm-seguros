@@ -48,7 +48,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 });
   }
 
-  const { contact_id, phone, kind, data, filename, caption } = body;
+  const { contact_id, phone, kind, data, filename, caption, deal_id } = body;
   if (!contact_id || !phone || !kind || !data) {
     return new Response(JSON.stringify({ error: 'contact_id, phone, kind e data são obrigatórios' }), { status: 400 });
   }
@@ -92,8 +92,41 @@ export const POST: APIRoute = async ({ locals, request }) => {
     return new Response(JSON.stringify({ error: 'UazapiGO recusou o envio', details: uaData?.message || uaRes.status }), { status: 502 });
   }
 
-  // Persiste o binário no nosso Storage (best-effort com retry) para o histórico
   const sb = createServerClient();
+  const waId = uaData.messageid || uaData.id || uaData?.message?.id || null;
+
+  // ── Grava a linha ANTES do upload (correção 03/08, testes A2/A3) ────────────
+  // Antes, o insert só acontecia depois do upload no Storage (com até 3 tentativas
+  // e backoff). Nessa janela o webhook da UazapiGO chegava, não encontrava nada com
+  // este wa_message_id e gravava a MESMA mensagem — duplicada no inbox, correta no
+  // WhatsApp. Gravando primeiro, o webhook encontra a linha e desiste; a media_url
+  // entra depois, por PATCH.
+  let { data: saved, error: dbErr } = await sb.from('marpe_messages').insert({
+    contact_id,
+    // Negócio em pauta na conversa (chamado 3a4d910f)
+    deal_id: deal_id || null,
+    wa_message_id: waId,
+    direction: 'outbound',
+    content_type: kind,
+    body: caption || (kind === 'document' ? filename || null : null),
+    media_url: null,
+    media_mime: mime,
+    status: 'sent',
+    sent_by: profile.id,
+    metadata: { sent_via: 'inbox_media', filename: filename || null },
+  }).select().single();
+
+  // 23505: o webhook chegou primeiro e já gravou — reaproveita a linha dele
+  if (dbErr && (dbErr as any).code === '23505' && waId) {
+    const { data: existente } = await sb.from('marpe_messages')
+      .select('*').eq('wa_message_id', waId).maybeSingle();
+    if (existente) { saved = existente as any; dbErr = null as any; }
+  }
+  if (dbErr) {
+    return new Response(JSON.stringify({ sent: true, saved: false, error: dbErr.message }), { status: 200 });
+  }
+
+  // Persiste o binário no nosso Storage (best-effort com retry) para o histórico
   let mediaUrl: string | null = null;
   const path = `${contact_id}/out_${Date.now()}.${extFromMime(mime)}`;
   for (let i = 0; i < 3 && !mediaUrl; i++) {
@@ -104,23 +137,10 @@ export const POST: APIRoute = async ({ locals, request }) => {
       await new Promise(r => setTimeout(r, 300 * (i + 1)));
     }
   }
-
-  const waId = uaData.messageid || uaData.id || uaData?.message?.id || null;
-  const { data: saved, error: dbErr } = await sb.from('marpe_messages').insert({
-    contact_id,
-    wa_message_id: waId,
-    direction: 'outbound',
-    content_type: kind,
-    body: caption || (kind === 'document' ? filename || null : null),
-    media_url: mediaUrl,
-    media_mime: mime,
-    status: 'sent',
-    sent_by: profile.id,
-    metadata: { sent_via: 'inbox_media', filename: filename || null },
-  }).select().single();
-
-  if (dbErr) {
-    return new Response(JSON.stringify({ sent: true, saved: false, error: dbErr.message }), { status: 200 });
+  if (mediaUrl && saved?.id) {
+    const { data: comMidia } = await sb.from('marpe_messages')
+      .update({ media_url: mediaUrl }).eq('id', saved.id).select().single();
+    if (comMidia) saved = comMidia as any;
   }
 
   // Aba Atendimento (critério do Tiago, 28/07): responder com mídia também

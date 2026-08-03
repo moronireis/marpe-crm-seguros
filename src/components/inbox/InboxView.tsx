@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import TemplateDropdown, { useTemplates, orderedTemplates, type Template } from '../shared/TemplateDropdown';
 import AudioPlayer from '../shared/AudioPlayer';
 import EmojiPicker from '../shared/EmojiPicker';
+import DealPicker, { type DealResumo } from './DealPicker';
 import { maskPhone, validPhone, validEmail } from '../../lib/masks';
 import { interpolateVariables } from '../../lib/variables';
 
@@ -17,6 +18,9 @@ interface Contact {
   inbox_read_at?: string | null;
   pinned?: boolean;
   conv_status?: string;
+  /** Negócio em pauta na conversa (chamado 3a4d910f, 01/08) */
+  active_deal_id?: string | null;
+  source?: string | null;
 }
 
 interface Message {
@@ -299,15 +303,33 @@ function formatTime(iso: string): string {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
-type InboxTab = 'conversas' | 'grupos' | 'naolidas' | 'finalizadas' | 'atendimento';
+// Fluxo do Menu Inbox (PDF do Marcel, chamado 3a4d910f, 01/08): QUATRO abas.
+// "Finalizadas" deixou de existir — o texto é explícito: "Quando estas forem
+// FINALIZADAS, o contato sai desta aba e volta para a aba CONTATOS. Não precisa
+// ter uma aba de FINALIZADAS." Isso também fecha o teste A7.
+type InboxTab = 'contatos' | 'grupos' | 'naolidas' | 'atendimento';
 
 const TAB_LABELS: Record<InboxTab, string> = {
-  conversas: 'Conversas',
+  contatos: 'Contatos',
   grupos: 'Grupos',
-  naolidas: 'Não lidas',
-  finalizadas: 'Finalizadas',
-  // Critério do Tiago (28/07): respondeu → a conversa entra em Atendimento
+  naolidas: 'Não lidos',
+  // Critério do Tiago (28/07) + Marcel (01/08): abrir a conversa põe em Atendimento
   atendimento: 'Atendimento',
+};
+
+const ABAS: InboxTab[] = ['contatos', 'grupos', 'naolidas', 'atendimento'];
+
+// Teste A2: o seletor de arquivos precisa filtrar pelo tipo escolhido no clipe
+const ACCEPT_POR_TIPO: Record<'document' | 'media', string> = {
+  media: 'image/*,video/*',
+  document: [
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.csv', '.zip', '.rar',
+    'application/pdf', 'application/msword', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/plain', 'text/csv', 'application/zip',
+  ].join(','),
 };
 
 // S1 #15 (27/07): filtros do Inbox persistem entre telas e sessões — mesmo
@@ -315,13 +337,15 @@ const TAB_LABELS: Record<InboxTab, string> = {
 const INBOX_PREFS_KEY = 'inbox_prefs_v1';
 
 function loadInboxPrefs(): { tab: InboxTab; tag: string } {
-  const fallback = { tab: 'conversas' as InboxTab, tag: '' };
+  const fallback = { tab: 'contatos' as InboxTab, tag: '' };
   if (typeof window === 'undefined') return fallback;
   try {
     const raw = window.localStorage.getItem(INBOX_PREFS_KEY);
     if (!raw) return fallback;
     const p = JSON.parse(raw);
-    const tab: InboxTab = ['conversas', 'grupos', 'naolidas', 'finalizadas', 'atendimento'].includes(p?.tab) ? p.tab : 'conversas';
+    // 'conversas' e 'finalizadas' são valores antigos (pré-03/08) que podem estar
+    // salvos no navegador do usuário — caem no padrão em vez de deixar a tela vazia.
+    const tab: InboxTab = ABAS.includes(p?.tab) ? p.tab : 'contatos';
     return { tab, tag: typeof p?.tag === 'string' ? p.tag : '' };
   } catch {
     return fallback;
@@ -334,7 +358,7 @@ export default function InboxView() {
   // S1 #9: abas do funil de atendimento. Critério da aba "Atendimento" definido
   // pelo Tiago em 28/07: responder → Atendimento; nova conversa conta em Não
   // lidas; finalizar → Finalizadas.
-  const [activeTab, setActiveTab] = useState<InboxTab>('conversas');
+  const [activeTab, setActiveTab] = useState<InboxTab>('contatos');
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
@@ -420,7 +444,9 @@ export default function InboxView() {
     && !readContactIds.has(c.id), [readContactIds]);
 
   function markRead(contactId: string) {
-    setReadContactIds(prev => { const s = new Set(prev); s.add(contactId); return s; });
+    // Devolve o MESMO Set quando já está marcado — sem isso, a remarcação de leitura
+    // com a conversa aberta (poll de 3s) forçaria re-render a cada ciclo.
+    setReadContactIds(prev => prev.has(contactId) ? prev : new Set(prev).add(contactId));
     fetch(`/api/contacts/${contactId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -541,6 +567,7 @@ export default function InboxView() {
             kind: items[i].kind,
             data: items[i].dataURI,
             filename: items[i].filename,
+            deal_id: negocioDaConversa?.id || null,
             // legenda só no primeiro arquivo (mesmo comportamento do WhatsApp)
             caption: i === 0 && caption && items[i].kind !== 'audio' ? caption : undefined,
           }),
@@ -613,7 +640,11 @@ export default function InboxView() {
       const sourceParam = activeTab === 'grupos'
         ? '&source=whatsapp_group'
         : '&exclude_source=whatsapp_group';
-      fetch(`/api/contacts?limit=50${q}${sourceParam}`)
+      // PDF 01/08, item 1: a aba Contatos mostra TODOS os contatos cadastrados —
+      // não só quem já trocou mensagem (é com quem nunca trocou que o item 1.1
+      // manda iniciar a conversa).
+      const todos = activeTab === 'contatos' ? '&todos=1' : '';
+      fetch(`/api/contacts?limit=50${q}${sourceParam}${todos}`)
         .then(r => r.json())
         .then(d => { setContacts(d.contacts || []); setLoadingContacts(false); })
         .catch(() => setLoadingContacts(false));
@@ -710,14 +741,24 @@ export default function InboxView() {
         .then(d => {
           const incoming: Message[] = d.messages || [];
           if (incoming.length === 0) return;
+          let chegouAlgoNovo = false;
           setMessages(prev => {
             const prevLastId = prev[prev.length - 1]?.id;
             if (incoming[incoming.length - 1]?.id === prevLastId) return prev;
-            if (prev.length === 0) return incoming;
+            if (prev.length === 0) { chegouAlgoNovo = true; return incoming; }
             const known = new Set(prev.map(m => m.id));
             const fresh = incoming.filter(m => !known.has(m.id));
-            return fresh.length ? [...prev, ...fresh] : prev;
+            if (!fresh.length) return prev;
+            chegouAlgoNovo = true;
+            return [...prev, ...fresh];
           });
+          // Teste A5: a leitura só era marcada no CLIQUE. Com a conversa aberta na
+          // tela, toda mensagem nova a devolvia para "não lida" — o contador nunca
+          // zerava, exatamente o que o Marcel descreveu. Com a janela em foco,
+          // mensagem que chega numa conversa aberta já nasce lida (padrão WhatsApp).
+          if (chegouAlgoNovo && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+            markRead(activeContactId);
+          }
         })
         .catch(() => {});
     }, 3000);
@@ -754,6 +795,49 @@ export default function InboxView() {
     (pinnedContact && pinnedContact.id === activeContactId ? pinnedContact : undefined);
   const isGroupContact = (activeContact as any)?.source === 'whatsapp_group';
 
+  // ── Negócio em pauta na conversa (chamado 3a4d910f) ────────────────────────
+  // Fica em marpe_contacts.active_deal_id; toda mensagem trocada enquanto ele está
+  // ativo nasce com deal_id, e é assim que a aba Conversas do card do negócio passa
+  // a ter o que mostrar (antes: 0 de 4.915 mensagens tinham negócio).
+  const [negocioDaConversa, setNegocioDaConversa] = useState<DealResumo | null>(null);
+  const [dealPickerAberto, setDealPickerAberto] = useState(false);
+  const pedidoDeNegocio = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setNegocioDaConversa(null);
+    const dealId = (activeContact as any)?.active_deal_id;
+    if (!activeContactId || isGroupContact) return;
+    if (!dealId) return;
+    fetch(`/api/deals/search?contact_id=${activeContactId}`)
+      .then(r => r.json())
+      .then(d => setNegocioDaConversa((d.deals || []).find((x: DealResumo) => x.id === dealId) || null))
+      .catch(() => {});
+  }, [activeContactId, (activeContact as any)?.active_deal_id, isGroupContact]);
+
+  // PDF 1.2: "ao iniciar uma conversa o sistema deverá pedir para que o usuário
+  // selecione sobre qual negócio é o assunto". Pede UMA vez por conversa por sessão
+  // — insistir a cada abertura viraria estorvo para quem só quer ler.
+  useEffect(() => {
+    if (!activeContactId || isGroupContact) return;
+    if ((activeContact as any)?.active_deal_id) return;
+    if (pedidoDeNegocio.current.has(activeContactId)) return;
+    pedidoDeNegocio.current.add(activeContactId);
+    const t = setTimeout(() => setDealPickerAberto(true), 450);
+    return () => clearTimeout(t);
+  }, [activeContactId, isGroupContact, (activeContact as any)?.active_deal_id]);
+
+  async function vincularNegocio(deal: DealResumo | null) {
+    if (!activeContactId) return;
+    setNegocioDaConversa(deal);
+    setDealPickerAberto(false);
+    patchContactLocal(activeContactId, { active_deal_id: deal?.id || null });
+    await fetch(`/api/contacts/${activeContactId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active_deal_id: deal?.id || null }),
+    }).catch(() => {});
+  }
+
   // S3.9 (issue #8): "@556299999999" → "@Nome" quando o número bate com um contato
   // carregado (compara pelos últimos 8 dígitos — cobre variações de 9º dígito/DDI)
   const resolveMentions = useCallback((text: string) => {
@@ -770,27 +854,22 @@ export default function InboxView() {
   const allTags = useMemo(() =>
     [...new Set(contacts.flatMap(c => c.tags || []))].sort(), [contacts]);
 
-  // S1 #9 (27/07): funil de atendimento em abas. "Finalizadas" resolve o apontamento
-  // de que finalizar marcava a conversa mas não a movia para lugar nenhum.
-  // As abas Conversas/Grupos buscam fontes diferentes na API; Não lidas e Finalizadas
-  // são recortes do conjunto de conversas individuais.
+  // Fluxo do PDF (01/08): Contatos = tudo que NÃO está em atendimento (inclusive o
+  // que já foi finalizado, que volta para cá); Atendimento = conversas em tratativa;
+  // Não lidos = o que chegou e ainda não foi visto; Grupos vem de outra fonte na API.
+  //
+  // A aba "Não lidos" filtrava por `conv_status !== 'closed'` — que não é critério de
+  // não-lida nenhum. Era a causa do teste A5 ("li todas e continua marcando 12"):
+  // a lista e o contador respondiam a coisas diferentes. Agora os dois usam isUnread,
+  // o mesmo critério de inbox_read_at que o /api/contacts/badges aplica no servidor.
   const listContacts = useMemo(() => {
     let list = contacts;
     if (activeTab === 'naolidas') list = list.filter(isUnread);
-    if (activeTab === 'finalizadas') list = list.filter(c => (c as any).conv_status === 'closed');
-    // Critério do Tiago (28/07): responder move a conversa para Atendimento;
-    // Conversas fica com as que ainda não tiveram resposta nossa.
     if (activeTab === 'atendimento') list = list.filter(c => (c as any).conv_status === 'atendimento');
-    if (activeTab === 'conversas') list = list.filter(c => (c as any).conv_status !== 'closed' && (c as any).conv_status !== 'atendimento');
-    if (activeTab === 'naolidas') list = list.filter(c => (c as any).conv_status !== 'closed');
+    if (activeTab === 'contatos') list = list.filter(c => (c as any).conv_status !== 'atendimento');
     if (tagFilter) list = list.filter(c => (c.tags || []).includes(tagFilter));
     return [...list].sort((a, b) => ((b as any).pinned ? 1 : 0) - ((a as any).pinned ? 1 : 0));
   }, [contacts, activeTab, tagFilter, isUnread]);
-
-  const closedCount = useMemo(
-    () => contacts.reduce((n, c) => n + ((c as any).conv_status === 'closed' ? 1 : 0), 0),
-    [contacts]
-  );
   const atendimentoCount = useMemo(
     () => contacts.reduce((n, c) => n + ((c as any).conv_status === 'atendimento' ? 1 : 0), 0),
     [contacts]
@@ -812,10 +891,9 @@ export default function InboxView() {
     return () => clearInterval(iv);
   }, []);
   const tabBadges: Record<InboxTab, number> = {
-    conversas: serverBadges?.conversas ?? 0,
+    contatos: serverBadges?.contatos ?? serverBadges?.conversas ?? 0,
     grupos: serverBadges?.grupos ?? 0,
     naolidas: serverBadges?.naolidas ?? unreadCount,
-    finalizadas: serverBadges?.finalizadas ?? closedCount,
     atendimento: serverBadges?.atendimento ?? atendimentoCount,
   };
 
@@ -950,6 +1028,8 @@ export default function InboxView() {
   const activeTemplate = templateOrder[Math.min(templateIdx, templateOrder.length - 1)] || null;
 
   const composerHasVars = /\{\{\w+\}\}/.test(newMsg);
+  // A10: marcadores de formatação do WhatsApp fechados (*negrito*, _itálico_, ~tachado~)
+  const composerHasFormat = /\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~|```[\s\S]+?```/.test(newMsg);
 
   async function syncCorp() {
     if (!activeContact?.corp_id || corpSyncing) return;
@@ -1020,7 +1100,8 @@ export default function InboxView() {
       await fetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contact_id: activeContactId, phone: phoneToSend, text: newMsg }),
+        // deal_id: a mensagem nasce vinculada ao negócio em pauta (chamado 3a4d910f)
+        body: JSON.stringify({ contact_id: activeContactId, phone: phoneToSend, text: newMsg, deal_id: negocioDaConversa?.id || null }),
       });
       setNewMsg('');
       if (inputRef.current) inputRef.current.style.height = 'auto';
@@ -1076,17 +1157,16 @@ export default function InboxView() {
           </div>
         </div>
 
-        {/* Report 30/07 [85b50d6c]: rolagem horizontal nas abas escondia Finalizadas
-            e Atendimento — o Tiago quer os estágios TODOS visíveis no bloco. As 5
-            abas agora quebram em duas linhas fixas (3 + 2), sem rolagem. */}
+        {/* Report 30/07 [85b50d6c]: os estágios têm que ficar TODOS visíveis, sem
+            rolagem. Com as 4 abas do fluxo de 01/08 elas cabem em duas linhas de 2. */}
         <div style={{ display: 'flex', flexWrap: 'wrap', borderBottom: '1px solid var(--hairline)', flexShrink: 0 }}>
-          {(['conversas', 'grupos', 'naolidas', 'finalizadas', 'atendimento'] as const).map(tab => {
+          {ABAS.map(tab => {
             const badges = tabBadges[tab] || 0;
             const on = activeTab === tab;
             return (
               <button key={tab} onClick={() => setActiveTab(tab)} title={TAB_LABELS[tab]}
                 style={{
-                  flex: '1 1 auto', minWidth: '31%', padding: '9px 4px', fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+                  flex: '1 1 auto', minWidth: '48%', padding: '9px 4px', fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
                   background: 'transparent', border: 'none', cursor: 'pointer',
                   borderBottom: `2px solid ${on ? 'var(--accent)' : 'var(--border-subtle)'}`,
                   color: on ? 'var(--accent-light)' : 'var(--text-muted)',
@@ -1136,8 +1216,7 @@ export default function InboxView() {
           ) : listContacts.length === 0 ? (
             <div style={{ padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
               {activeTab === 'naolidas' ? 'Nenhuma conversa não lida'
-                : activeTab === 'finalizadas' ? 'Nenhuma conversa finalizada'
-                : activeTab === 'atendimento' ? 'Nenhuma conversa em atendimento — responda uma conversa e ela entra aqui'
+                : activeTab === 'atendimento' ? 'Nenhuma conversa em atendimento — abra uma conversa e ela entra aqui'
                 : activeTab === 'grupos' ? 'Nenhum grupo encontrado'
                 : 'Nenhum contato encontrado'}
             </div>
@@ -1416,6 +1495,36 @@ export default function InboxView() {
             <div ref={msgEndRef} />
           </div>
 
+          {/* Negócio em pauta (chamado 3a4d910f, PDF do Marcel): a conversa precisa
+              ficar salva no negócio certo. A barra mostra qual é e permite trocar no
+              meio da conversa — o item 1.3 do PDF ("transfira ou indique o novo
+              negócio"), cuja posição estava marcada lá como pendência de UX.
+              Grupos ficam de fora: grupo não pertence a um negócio. */}
+          {!selectMode && activeContact && !isGroupContact && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+              padding: '7px 14px', marginBottom: 8, borderRadius: 12,
+              background: negocioDaConversa ? 'var(--accent-dim)' : 'var(--field-bg)',
+              border: `1px solid ${negocioDaConversa ? 'rgba(59,130,246,0.28)' : 'var(--hairline)'}`,
+            }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={negocioDaConversa ? 'var(--accent-light)' : 'var(--text-muted)'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+              </svg>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flexShrink: 0 }}>Negócio:</span>
+              <span style={{
+                fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                color: negocioDaConversa ? 'var(--accent-light)' : 'var(--text-muted)',
+              }}>
+                {negocioDaConversa ? negocioDaConversa.title : 'nenhum selecionado — a conversa não está sendo salva em nenhum negócio'}
+              </span>
+              <button onClick={() => setDealPickerAberto(true)}
+                style={{ padding: '5px 11px', borderRadius: 8, border: '1px solid var(--hairline)', background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500, flexShrink: 0 }}>
+                {negocioDaConversa ? 'Trocar' : 'Selecionar'}
+              </button>
+            </div>
+          )}
+
           {/* S2 #14: barra do modo seleção — substitui o composer enquanto ativo,
               igual ao WhatsApp quando você seleciona mensagens */}
           {selectMode ? (
@@ -1459,11 +1568,17 @@ export default function InboxView() {
               {emojiOpen && (
                 <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />
               )}
-              {/* Preview de variáveis (item 5) — some quando o picker "/" está aberto */}
-              {composerHasVars && !showTemplates && (
+              {/* Preview da mensagem (item 5) — some quando o picker "/" está aberto.
+                  Teste A10 (Marcel, 01/08): "o *negrito* funciona mas seria interessante
+                  a palavra ou frase ficar em negrito já na caixa de texto antes de
+                  enviar, como no whats mesmo". O preview agora aparece também quando há
+                  formatação (não só variáveis) e RENDERIZA negrito/itálico/tachado/mono
+                  com o mesmo formatWaText que desenha a mensagem no chat — o que se vê
+                  aqui é exatamente o que vai chegar. */}
+              {(composerHasVars || composerHasFormat) && !showTemplates && (
                 <div className="glass-modal fade-in" style={{ position: 'absolute', bottom: 'calc(100% + 10px)', left: 16, right: 16, zIndex: 40, borderRadius: 14, padding: '9px 13px', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent-light)', display: 'block', marginBottom: 3 }}>Preview da mensagem</span>
-                  {interpolateVariables(newMsg, { contact: activeContact })}
+                  {formatWaText(interpolateVariables(newMsg, { contact: activeContact }))}
                 </div>
               )}
               {/* S3.1 (issues #1 #5): preview do anexo antes do envio */}
@@ -1520,7 +1635,16 @@ export default function InboxView() {
                     ['media', 'Fotos e vídeos', 'M3 3h18v18H3z M8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M21 15l-5-5L5 21'],
                   ] as const).map(([kind, label, path]) => (
                     <div key={kind}
-                      onClick={() => { fileInputKind.current = kind; setAttachMenuOpen(false); fileInputRef.current?.click(); }}
+                      onClick={() => {
+                        fileInputKind.current = kind;
+                        setAttachMenuOpen(false);
+                        // Teste A2: "ao selecionar 'Fotos e Vídeos' o sistema deve mostrar
+                        // somente fotos e vídeos. Está mostrando todos. Na opção docs a
+                        // mesma coisa." O tipo escolhido ficava só numa ref e nunca chegava
+                        // ao seletor de arquivos do sistema — o accept ia sempre vazio.
+                        if (fileInputRef.current) fileInputRef.current.accept = ACCEPT_POR_TIPO[kind];
+                        fileInputRef.current?.click();
+                      }}
                       style={{ padding: '9px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, transition: 'background 0.15s var(--ease-out)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
@@ -1789,6 +1913,17 @@ export default function InboxView() {
           onSent={exitSelectMode}
         />,
         document.body
+      )}
+
+      {/* Modal "Selecione o negócio" (chamado 3a4d910f) */}
+      {dealPickerAberto && activeContact && !isGroupContact && (
+        <DealPicker
+          contactId={activeContact.id}
+          contactName={activeContact.name}
+          atualId={negocioDaConversa?.id || null}
+          onEscolher={vincularNegocio}
+          onFechar={() => setDealPickerAberto(false)}
+        />
       )}
     </div>
   );

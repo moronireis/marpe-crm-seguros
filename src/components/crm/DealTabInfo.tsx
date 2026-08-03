@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react';
 
 interface Deal {
   id: string; title: string; ramo: string | null; seguradora: string | null; apolice: string | null;
-  premio: number | null; comissao_pct: number | null; comissao_valor: number | null;
+  // premio = LÍQUIDO (base da comissão); premio_final é gerado no banco (premio + iof)
+  premio: number | null; iof: number | null; premio_final?: number | null;
+  comissao_pct: number | null; comissao_valor: number | null;
+  forma_pagamento: string | null; parcelas: number | null;
   vigencia_inicio: string | null; vigencia_fim: string | null; veiculo: string | null; placa: string | null;
   deal_type: string | null; next_action: string | null; next_action_date: string | null;
   stage_id: string; funnel_id: string;
@@ -141,8 +144,11 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
       deal_type: deal.deal_type || 'prospeccao',
       campanha: deal.campanha || '',
       premio: deal.premio ?? '',
+      iof: deal.iof ?? '',
       comissao_pct: deal.comissao_pct ?? '',
       comissao_valor: deal.comissao_valor ?? '',
+      forma_pagamento: deal.forma_pagamento || '',
+      parcelas: deal.parcelas ?? '',
       vigencia_inicio: deal.vigencia_inicio || '',
       vigencia_fim: deal.vigencia_fim || '',
       // Responsável: negócio sem responsável assume o usuário logado (checkpoint 14/07)
@@ -179,8 +185,10 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
     for (const [key, val] of Object.entries(form)) {
       if (key === 'ja_possui_produto') {
         updates[key] = val;
-      } else if (['premio', 'comissao_pct', 'comissao_valor', 'base_calculo_repasse', 'pct_repasse', 'valor_repasse'].includes(key)) {
+      } else if (['premio', 'iof', 'comissao_pct', 'comissao_valor', 'base_calculo_repasse', 'pct_repasse', 'valor_repasse'].includes(key)) {
         updates[key] = val !== '' ? parseFloat(val) : null;
+      } else if (key === 'parcelas') {
+        updates[key] = val !== '' ? parseInt(String(val), 10) : null;
       } else {
         updates[key] = val || null;
       }
@@ -248,12 +256,19 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
         {/* Estimativas e Valores */}
         <div style={s.section}>
           <div style={s.sectionTitle}>Estimativas e Valores</div>
-          <div style={s.row}><span style={s.label}>Prêmio</span><span style={s.value}>{deal.premio ? `R$ ${fmt(deal.premio)}` : '—'}</span></div>
+          {/* Teste B4 (Marcel, 01/08): líquido é a base da comissão e do relatório de
+              produção; final (líquido + IOF) é o que interessa ao cliente. */}
+          <div style={s.row}><span style={s.label}>Prêmio líquido</span><span style={s.value}>{deal.premio ? `R$ ${fmt(deal.premio)}` : '—'}</span></div>
+          <div style={s.row}><span style={s.label}>IOF</span><span style={s.value}>{deal.iof ? `R$ ${fmt(deal.iof)}` : '—'}</span></div>
+          <div style={s.row}><span style={s.label}>Prêmio final</span><span style={s.value}>{deal.premio_final ? `R$ ${fmt(deal.premio_final)}` : (deal.premio ? `R$ ${fmt(deal.premio)}` : '—')}</span></div>
           <div style={s.row}><span style={s.label}>% Comissão</span><span style={s.value}>{deal.comissao_pct ? `${deal.comissao_pct}%` : '—'}</span></div>
           <div style={s.row}><span style={s.label}>Vr. Comissão</span><span style={s.value}>{deal.comissao_valor ? `R$ ${fmt(deal.comissao_valor)}` : '—'}</span></div>
           {deal.base_calculo_repasse != null && <div style={s.row}><span style={s.label}>Base de Cálc. Repasse</span><span style={s.value}>{deal.base_calculo_repasse === 5 ? 'Com. Corretora' : `Código ${deal.base_calculo_repasse}`}</span></div>}
           {deal.pct_repasse && <div style={s.row}><span style={s.label}>% Repasse</span><span style={s.value}>{deal.pct_repasse}%</span></div>}
           {deal.valor_repasse && <div style={s.row}><span style={s.label}>Vr. Repasse</span><span style={s.value}>R$ {fmt(deal.valor_repasse)}</span></div>}
+          {/* Chamado 5cb84ad8 (Marcel, 01/08) */}
+          <div style={s.row}><span style={s.label}>Forma de pagamento</span><span style={s.value}>{deal.forma_pagamento || '—'}</span></div>
+          <div style={s.row}><span style={s.label}>Parcelamento</span><span style={s.value}>{deal.parcelas ? `${deal.parcelas}x` : '—'}</span></div>
         </div>
 
         {/* Produtores */}
@@ -438,12 +453,34 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
         <div style={s.sectionTitle}>Estimativas e Valores</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <div>
-            <label style={s.label}>Prêmio (R$)</label>
+            <label style={s.label}>Prêmio líquido (R$)</label>
             <input type="number" min="0" step="0.01" value={form.premio} onChange={field('premio')} style={s.input} />
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Base da comissão</div>
+          </div>
+          <div>
+            <label style={s.label}>IOF (R$)</label>
+            <input type="number" min="0" step="0.01" value={form.iof} onChange={field('iof')} style={s.input} />
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+              Final: R$ {((parseFloat(String(form.premio)) || 0) + (parseFloat(String(form.iof)) || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
           </div>
           <div>
             <label style={s.label}>% Comissão</label>
             <input type="number" min="0" max="100" step="0.1" value={form.comissao_pct} onChange={field('comissao_pct')} style={s.input} />
+          </div>
+          <div>
+            <label style={s.label}>Forma de pagamento</label>
+            <select value={String(form.forma_pagamento ?? '')} onChange={field('forma_pagamento')} style={s.select}>
+              <option value="">—</option>
+              {['Boleto', 'Débito em conta', 'Cartão de crédito', 'PIX'].map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={s.label}>Parcelamento</label>
+            <select value={String(form.parcelas ?? '')} onChange={field('parcelas')} style={s.select}>
+              <option value="">—</option>
+              {Array.from({ length: 10 }, (_, i) => i + 1).map(n => <option key={n} value={String(n)}>{n}x</option>)}
+            </select>
           </div>
         </div>
         <div style={{ marginTop: 8 }}>

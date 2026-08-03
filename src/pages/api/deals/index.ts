@@ -12,24 +12,49 @@ export const GET: APIRoute = async ({ locals, url }) => {
   const sb = createServerClient();
   const funnelId = url.searchParams.get('funnel_id');
 
-  // Fetch ALL deals of the funnel — Supabase caps each request at 1000 rows,
-  // so paginate server-side. (A fixed limit of 500 hid ~90% of the 4.5k deals.)
+  // ── Colunas do CARD, não a linha inteira (chamado 59eaf2a2, 03/08) ──────────
+  // O funil Vendas tem 4.878 negócios. Com `select('*')` + 3 joins isso dava
+  // ~1,5 MB por página de 1.000 → ~7,3 MB e 5 idas SEQUENCIAIS ao banco (3,7 s só
+  // de banco, medido em produção) antes de o board pintar qualquer coisa.
+  // Aqui vai só o que a interface do card usa; o resto o painel busca sob demanda
+  // em GET /api/deals/[id] quando o negócio é aberto.
+  const COLUNAS_DO_CARD = [
+    'id', 'contact_id', 'title', 'ramo', 'seguradora', 'apolice',
+    'premio', 'iof', 'premio_final', 'comissao_valor', 'deal_type',
+    'vigencia_inicio', 'vigencia_fim', 'stage_id', 'funnel_id',
+    'status_custom', 'status_color', 'next_action', 'next_action_date',
+    'produtor', 'responsible_id', 'created_at',
+    'marpe_contacts!contact_id(id, name, phone, photo_url)',
+    // marpe_funnel_stages e marpe_profiles saíram daqui: os dois só alimentavam as
+    // colunas "Etapa" e "Responsável" da Grade, e as duas listas já são carregadas
+    // inteiras à parte (stages do funil e /api/users). Repetir nome+cor da etapa e
+    // nome do responsável em cada uma das 4.877 linhas era peso puro — agora a Grade
+    // resolve por id em memória.
+  ].join(', ');
+
   const PAGE_SIZE = 1000;
-  const all: any[] = [];
-  for (let page = 0; ; page++) {
-    let query = sb.from('marpe_deals')
-      .select('*, marpe_contacts(id, name, phone, email, tags, photo_url), marpe_funnel_stages(id, name, color, sort_order, is_terminal, terminal_type), marpe_profiles!responsible_id(id, full_name)')
-      .order('created_at', { ascending: false })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (funnelId) query = query.eq('funnel_id', funnelId);
+  const base = () => {
+    const q = sb.from('marpe_deals').select(COLUNAS_DO_CARD).order('created_at', { ascending: false });
+    return funnelId ? q.eq('funnel_id', funnelId) : q;
+  };
 
-    const { data, error } = await query;
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-    all.push(...(data || []));
-    if (!data || data.length < PAGE_SIZE) break;
-  }
+  // Conta primeiro (HEAD, sem trazer linha) para disparar as páginas EM PARALELO —
+  // antes eram 5 idas em fila, cada uma esperando a anterior.
+  let contagem = sb.from('marpe_deals').select('id', { count: 'exact', head: true });
+  if (funnelId) contagem = contagem.eq('funnel_id', funnelId);
+  const { count, error: countErr } = await contagem;
+  if (countErr) return new Response(JSON.stringify({ error: countErr.message }), { status: 500 });
 
-  return new Response(JSON.stringify({ deals: all }), { status: 200 });
+  const paginas = Math.max(1, Math.ceil((count || 0) / PAGE_SIZE));
+  const respostas = await Promise.all(
+    Array.from({ length: paginas }, (_, p) => base().range(p * PAGE_SIZE, (p + 1) * PAGE_SIZE - 1))
+  );
+
+  const erro = respostas.find(r => r.error);
+  if (erro?.error) return new Response(JSON.stringify({ error: erro.error.message }), { status: 500 });
+
+  const all = respostas.flatMap(r => r.data || []);
+  return new Response(JSON.stringify({ deals: all, total: count ?? all.length }), { status: 200 });
 };
 
 export const POST: APIRoute = async ({ locals, request }) => {
@@ -133,11 +158,17 @@ export const POST: APIRoute = async ({ locals, request }) => {
       observacoes_proposta: body.observacoes_proposta || null,
       veiculo: body.veiculo || null,
       placa: body.placa || null,
+      // Teste B4 (01/08): premio = LÍQUIDO (base da comissão); premio_final é coluna
+      // GERADA no banco (premio + iof) — nunca escrever nela aqui.
+      iof: body.iof ?? null,
+      // Chamado 5cb84ad8 (01/08): só CRM, a CorpAPI não tem estes campos
+      forma_pagamento: body.forma_pagamento || null,
+      parcelas: body.parcelas ?? null,
       next_action: body.next_action || null,
       next_action_date: body.next_action_date || null,
       ...(body.detalhes_corp ? { detalhes_corp: body.detalhes_corp } : {}),
     })
-    .select('*, marpe_contacts(id, name, phone), marpe_funnel_stages(id, name, color)')
+    .select('*, marpe_contacts!contact_id(id, name, phone), marpe_funnel_stages(id, name, color)')
     .single();
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });

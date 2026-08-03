@@ -38,6 +38,10 @@ export interface InterpolationContext {
     apolice?: string | null;
     seguradora?: string | null;
     premio?: number | string | null;
+    iof?: number | string | null;
+    premio_final?: number | string | null;
+    forma_pagamento?: string | null;
+    parcelas?: number | string | null;
     comissao_valor?: number | string | null;
     ramo?: string | null;
     produtor?: string | null;
@@ -120,7 +124,14 @@ export function interpolateVariables(
     placa: str(deal?.placa),
     apolice: str(deal?.apolice),
     seguradora: str(deal?.seguradora),
-    premio: formatBRL(deal?.premio),
+    // Teste B4 (01/08): "Prêmio FINAL é o que interessa para o cliente" — e é o cliente
+    // que lê a mensagem. {{premio}} passa a ser o final (líquido + IOF); sem IOF
+    // preenchido os dois são o mesmo número, então nenhum template muda hoje.
+    premio: formatBRL(deal?.premio_final ?? deal?.premio),
+    premio_liquido: formatBRL(deal?.premio),
+    iof: formatBRL(deal?.iof),
+    forma_pagamento: str(deal?.forma_pagamento),
+    parcelas: deal?.parcelas ? `${deal.parcelas}x` : '',
     comissao: formatBRL(deal?.comissao_valor),
     ramo: str(deal?.ramo),
     produtor: str(deal?.produtor),

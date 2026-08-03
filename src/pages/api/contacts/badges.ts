@@ -34,7 +34,7 @@ export const GET: APIRoute = async ({ locals }) => {
 
   const ids = [...latest.keys()];
   if (!ids.length) {
-    return new Response(JSON.stringify({ conversas: 0, grupos: 0, naolidas: 0, atendimento: 0, finalizadas: 0 }), { status: 200 });
+    return new Response(JSON.stringify({ contatos: 0, grupos: 0, naolidas: 0, atendimento: 0 }), { status: 200 });
   }
 
   const { data: contacts } = await sb
@@ -42,7 +42,9 @@ export const GET: APIRoute = async ({ locals }) => {
     .select('id, source, conv_status, inbox_read_at')
     .in('id', ids);
 
-  const counts = { conversas: 0, grupos: 0, naolidas: 0, atendimento: 0, finalizadas: 0 };
+  // Quatro abas (fluxo de 01/08). "Finalizadas" saiu: conversa finalizada volta a
+  // ser um contato comum e é contada em Contatos como qualquer outra.
+  const counts = { contatos: 0, grupos: 0, naolidas: 0, atendimento: 0 };
   for (const c of contacts || []) {
     const last = latest.get(c.id)!;
     const unread = last.direction === 'inbound' &&
@@ -52,11 +54,10 @@ export const GET: APIRoute = async ({ locals }) => {
       if (unread) counts.grupos++;
       continue;
     }
-    if (c.conv_status === 'closed') { counts.finalizadas++; continue; }
     if (unread) {
       counts.naolidas++;
       if (c.conv_status === 'atendimento') counts.atendimento++;
-      else counts.conversas++;
+      else counts.contatos++;
     }
   }
 

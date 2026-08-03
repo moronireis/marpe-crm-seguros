@@ -89,11 +89,21 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
     // S3 (27/07): campos do cadastro PF/PJ
     'escolaridade', 'cnh_vencimento', 'contato_empresa',
     // Revisão 28/07 (§10): campos comuns só-CRM
-    'nome_negocio', 'produto_detalhes'];
+    'nome_negocio', 'produto_detalhes',
+    // Fluxo do Inbox (01/08): negócio em pauta na conversa
+    'active_deal_id'];
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const key of allowed) {
     if (key in body) updates[key] = body[key];
+  }
+
+  // A marca de leitura é carimbada pelo SERVIDOR (teste A5). Vinha do relógio do
+  // navegador: se ele estivesse atrasado em relação ao banco, a mensagem recém
+  // recebida continuava "mais nova que a leitura" e a conversa nunca saía de
+  // não lida, por mais que o usuário abrisse.
+  if ('inbox_read_at' in body && body.inbox_read_at) {
+    updates.inbox_read_at = new Date().toISOString();
   }
 
   const sb = createServerClient();

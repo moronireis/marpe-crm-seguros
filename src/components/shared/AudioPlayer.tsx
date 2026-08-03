@@ -43,8 +43,10 @@ export default function AudioPlayer({ src, mime, avatarUrl }: { src: string | nu
   const [loadError, setLoadError] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number>(0);
   const dragging = useRef(false);
+  const progressRef = useRef(0); // espelho do progresso para os observers, sem re-render
 
   // Alturas determinísticas a partir da URL — o mesmo áudio desenha igual sempre
   const bars = useMemo(() => {
@@ -60,14 +62,21 @@ export default function AudioPlayer({ src, mime, avatarUrl }: { src: string | nu
   const draw = useRef((prog: number) => {});
   draw.current = (prog: number) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const box = wrapRef.current;
+    if (!canvas || !box) return;
     const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
+    // A medida SEMPRE vem do wrapper, nunca da própria canvas.
+    // Ler `canvas.clientWidth` aqui era o bug do chamado 27e9e5be: escrever
+    // `canvas.width` muda a largura INTRÍNSECA do elemento e, como `min-width: auto`
+    // de um elemento substituído resolve para a intrínseca, o layout crescia — o que
+    // realimentava esta função (rAF, 60fps) e espalhava as barras pela tela toda.
+    // Só acontecia com devicePixelRatio > 1 (Windows a 125%, retina).
+    const w = Math.round(box.clientWidth);
+    const h = Math.round(box.clientHeight);
     if (!w || !h) return;
-    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
     }
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -94,12 +103,16 @@ export default function AudioPlayer({ src, mime, avatarUrl }: { src: string | nu
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   };
 
-  // Loop de rAF para progresso suave
+  // Loop de rAF para progresso suave — SÓ enquanto este áudio toca.
+  // Antes o loop rodava sempre, chamando setProgress a 60fps em TODOS os players
+  // da conversa (re-render em cascata) mesmo com tudo pausado.
   useEffect(() => {
+    if (!playing) return;
     function tick() {
       const el = audioRef.current;
       if (el && el.duration > 0) {
         const p = el.currentTime / el.duration;
+        progressRef.current = p;
         setProgress(p);
         draw.current(p);
       }
@@ -107,7 +120,10 @@ export default function AudioPlayer({ src, mime, avatarUrl }: { src: string | nu
     }
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, []);
+  }, [playing]);
+
+  // Primeira pintura (barras cinza) quando a canvas entra na tela
+  useEffect(() => { draw.current(progressRef.current); }, [bars]);
 
   // #12: registra o "pause" deste player no controlador global
   useEffect(() => {
@@ -119,13 +135,16 @@ export default function AudioPlayer({ src, mime, avatarUrl }: { src: string | nu
   }, []);
 
   // Redesenha ao redimensionar e ao trocar de tema (as cores vêm do CSS)
+  // Sem `progress` na lista de dependências: com ele, os observers eram destruídos
+  // e recriados a cada quadro do rAF.
   useEffect(() => {
-    const ro = new ResizeObserver(() => draw.current(progress));
-    if (canvasRef.current) ro.observe(canvasRef.current);
-    const mo = new MutationObserver(() => draw.current(progress));
+    // Observa o WRAPPER — observar a canvas fecharia o laço de realimentação
+    const ro = new ResizeObserver(() => draw.current(progressRef.current));
+    if (wrapRef.current) ro.observe(wrapRef.current);
+    const mo = new MutationObserver(() => draw.current(progressRef.current));
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => { ro.disconnect(); mo.disconnect(); };
-  }, [progress]);
+  }, []);
 
   function togglePlay() {
     const el = audioRef.current;
@@ -148,6 +167,7 @@ export default function AudioPlayer({ src, mime, avatarUrl }: { src: string | nu
     if (!el || !el.duration) return;
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     el.currentTime = ratio * el.duration;
+    progressRef.current = ratio;
     setProgress(ratio);
     draw.current(ratio);
   }
@@ -220,16 +240,23 @@ export default function AudioPlayer({ src, mime, avatarUrl }: { src: string | nu
             }
           </button>
 
-          <canvas
-            ref={canvasRef}
-            style={{ flex: 1, height: 34, cursor: 'pointer', display: 'block' }}
+          {/* O wrapper é quem tem tamanho no layout; a canvas é absoluta e nunca
+              influencia a largura do pai (ver comentário em draw.current). */}
+          <div
+            ref={wrapRef}
+            style={{ flex: 1, minWidth: 0, height: 34, position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
             onMouseDown={e => { dragging.current = true; seek(e.clientX, e.currentTarget.getBoundingClientRect()); }}
             onMouseMove={e => { if (dragging.current) seek(e.clientX, e.currentTarget.getBoundingClientRect()); }}
             onMouseUp={() => { dragging.current = false; }}
             onMouseLeave={() => { dragging.current = false; }}
             onTouchStart={e => seek(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())}
             onTouchMove={e => seek(e.touches[0].clientX, e.currentTarget.getBoundingClientRect())}
-          />
+          >
+            <canvas
+              ref={canvasRef}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
+            />
+          </div>
         </div>
 
         <div style={{ fontSize: 10, color: 'var(--text-muted)', paddingLeft: 40, letterSpacing: '0.02em' }}>
@@ -240,8 +267,8 @@ export default function AudioPlayer({ src, mime, avatarUrl }: { src: string | nu
       <audio
         ref={audioRef}
         preload="metadata"
-        onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
-        onEnded={() => { setPlaying(false); setProgress(0); draw.current(0); }}
+        onLoadedMetadata={() => { setDuration(audioRef.current?.duration || 0); draw.current(progressRef.current); }}
+        onEnded={() => { setPlaying(false); progressRef.current = 0; setProgress(0); draw.current(0); }}
         onPause={() => setPlaying(false)}
         onError={() => setLoadError(true)}
         style={{ display: 'none' }}

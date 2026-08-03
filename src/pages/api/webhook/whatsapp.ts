@@ -554,12 +554,48 @@ export const POST: APIRoute = async ({ request }) => {
     }
   }
 
+  // ── Dedupe TARDIO (correção 03/08, testes A2/A3) ──────────────────────────
+  // A checagem lá de cima roda ANTES do download da mídia e do upload no Storage —
+  // segundos de janela em que o próprio CRM insere a mensagem que acabou de enviar.
+  // Resultado: a mesma mensagem aparecia 2× no inbox (e 1× no WhatsApp). Verificado
+  // em produção: 3 pares com wa_message_id idêntico nos testes do Marcel de 01/08.
+  // Aqui a checagem é refeita colada no insert; o índice UNIQUE parcial em
+  // wa_message_id (migração 20260803) é a rede de segurança para a corrida restante.
+  if (messageId) {
+    const { data: jaExiste } = await sb
+      .from('marpe_messages')
+      .select('id, media_url')
+      .eq('wa_message_id', messageId)
+      .maybeSingle();
+    if (jaExiste?.id) {
+      // O caminho de envio pode ter gravado sem mídia (upload no Storage falhou) —
+      // se o webhook conseguiu a mídia, completa a linha em vez de duplicar.
+      if (!jaExiste.media_url && finalMediaUrl) {
+        await sb.from('marpe_messages')
+          .update({ media_url: finalMediaUrl, media_mime: finalMime })
+          .eq('id', jaExiste.id);
+      }
+      return new Response('OK', { status: 200 });
+    }
+  }
+
   // Save message — media_url and media_mime stored for attachment rendering in inbox
   // Note: group messages never trigger deals or automations, mas a DIREÇÃO vale
   // para grupo também (S1 #10, 27/07): antes gravávamos todo grupo como 'inbound',
   // então no chat as mensagens da própria corretora apareciam empilhadas à esquerda.
-  await sb.from('marpe_messages').insert({
+  // Negócio em pauta da conversa (chamado 3a4d910f): a mensagem que CHEGA também
+  // entra no negócio que está sendo tratado — é o que faz a aba Conversas do card
+  // ter os dois lados do diálogo, e não só o que a corretora escreveu.
+  let dealDaConversa: string | null = null;
+  if (!isGroup) {
+    const { data: ct } = await sb.from('marpe_contacts')
+      .select('active_deal_id').eq('id', contactId).maybeSingle();
+    dealDaConversa = (ct as any)?.active_deal_id || null;
+  }
+
+  const { error: insertErr } = await sb.from('marpe_messages').insert({
     contact_id: contactId,
+    deal_id: dealDaConversa,
     wa_message_id: messageId || null,
     direction: fromMe ? 'outbound' : 'inbound',
     content_type: finalContentType,
@@ -587,6 +623,12 @@ export const POST: APIRoute = async ({ request }) => {
       } : {}),
     },
   });
+
+  // 23505 = violação do índice UNIQUE de wa_message_id: o caminho de envio ganhou a
+  // corrida e já gravou esta mensagem. É sucesso, não erro.
+  if (insertErr && insertErr.code !== '23505') {
+    console.error('[webhook] falha ao gravar mensagem:', insertErr.message);
+  }
 
   // S3.8: conversa finalizada reabre sozinha quando o cliente manda mensagem nova
   if (!isGroup && !fromMe) {

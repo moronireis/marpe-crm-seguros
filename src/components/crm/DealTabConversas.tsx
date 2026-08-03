@@ -96,11 +96,17 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
   const [search, setSearch] = useState('');
   const [showFilters, setShowFilters] = useState(false);
 
+  // Chamado 3a4d910f (01/08): agora que o Inbox vincula a conversa a um negócio,
+  // dá para separar "o que foi tratado NESTE negócio" de "tudo com esta pessoa".
+  // O padrão continua sendo tudo do contato — as ~4.900 mensagens anteriores a
+  // 03/08 não têm negócio nenhum, e filtrar por negócio deixaria a aba vazia nelas.
+  const [soDesteNegocio, setSoDesteNegocio] = useState(false);
+
   function buildUrl(before?: string) {
     // Query by contact: the WhatsApp thread belongs to the person. Inbound messages
     // arrive by phone number and never carry deal_id, so filtering by deal_id showed
     // an empty conversation on most deals. Fallback to deal_id when contact is missing.
-    let url = contactId
+    let url = (contactId && !soDesteNegocio)
       ? `/api/messages?contact_id=${contactId}`
       : `/api/messages?deal_id=${dealId}`;
     if (dateFrom) url += `&date_from=${dateFrom}`;
@@ -179,13 +185,13 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
   useEffect(() => {
     const iv = setInterval(loadMessages, 5000);
     return () => clearInterval(iv);
-  }, [dealId, contactId, dateFrom, dateTo, search]);
+  }, [dealId, contactId, dateFrom, dateTo, search, soDesteNegocio]);
 
   // Reload when filters change
   useEffect(() => {
     setLoading(true);
     loadMessages();
-  }, [dateFrom, dateTo, search]);
+  }, [dateFrom, dateTo, search, soDesteNegocio]);
 
   async function handleSend() {
     if (attach) { await sendMedia(); return; }
@@ -333,6 +339,15 @@ export default function DealTabConversas({ dealId, contactPhone, contactId, onSe
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               style={{ padding: '4px 6px', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, outline: 'none', fontFamily: 'inherit' }} />
           </div>
+          {/* Chamado 3a4d910f: separar o que foi tratado neste negócio */}
+          {contactId && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, justifyContent: 'flex-end' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-secondary)', cursor: 'pointer', paddingBottom: 5 }}>
+                <input type="checkbox" checked={soDesteNegocio} onChange={e => setSoDesteNegocio(e.target.checked)} style={{ cursor: 'pointer' }} />
+                Só deste negócio
+              </label>
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 120 }}>
             <span style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Buscar</span>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar nas mensagens..."

@@ -254,6 +254,13 @@ export function negocioDetailFields(det: CorpNegocioDetail): Record<string, any>
   return {
     ...extractProdutorAgente(det),
     ...(proxDescricao ? { next_action: proxDescricao } : {}),
+    // Teste B7 (Marcel, 01/08): "editar um negócio no Corp e abrir o card → dado
+    // atualizado na hora" → "não atualiza". Faltava justamente o que mais se edita:
+    // o refresh por negócio (que roda ao abrir o card) copiava percentuais e textos
+    // mas NÃO o prêmio nem o valor da comissão — esses só chegavam no sync de lista,
+    // até 30 min depois. Os nomes são os mesmos do detail e da lista.
+    premio: det.val_premio ?? null,
+    comissao_valor: det.val_c ?? null,
     comissao_pct: det.per_c || null,
     campanha: det.campanha || null,
     seguradora: det.seguradora || null,

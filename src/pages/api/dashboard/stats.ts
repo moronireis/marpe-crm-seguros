@@ -38,7 +38,7 @@ export const GET: APIRoute = async ({ locals }) => {
     sb.from('marpe_funnel_stages').select('id, is_terminal, terminal_type'),
     sb.from('marpe_surveys').select('id, status, rating'),
     sb.from('marpe_deal_activities')
-      .select('id, deal_id, type, description, created_at, marpe_deals(title, marpe_contacts(name))')
+      .select('id, deal_id, type, description, created_at, marpe_deals(title, marpe_contacts!contact_id(name))')
       .order('created_at', { ascending: false })
       .limit(10),
     sb.from('marpe_automations').select('id, is_active'),

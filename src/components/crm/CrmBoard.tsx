@@ -137,6 +137,10 @@ function QuickAction({ title, onClick, children }: { title: string; onClick: () 
 
 const QA_ICON: React.CSSProperties = { width: 13, height: 13 };
 
+// Chamado 5cb84ad8 (Marcel, 01/08): "FORMA DE PAGAMENTO (Boleto, Débito em Conta,
+// Cartão de Crédito ou PIX) e o PARCELAMENTO (1x 2x 3x 4x... 10x)"
+export const FORMAS_PAGAMENTO = ['Boleto', 'Débito em conta', 'Cartão de crédito', 'PIX'] as const;
+
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 interface Funnel { id: string; name: string; stages: Stage[]; }
 interface Stage { id: string; name: string; color: string; sort_order: number; is_terminal?: boolean; terminal_type?: string | null; }
@@ -149,8 +153,6 @@ interface Deal {
   produtor: string | null; responsible_id: string | null;
   created_at: string | null;
   marpe_contacts: { id: string; name: string; phone: string | null; photo_url?: string | null } | null;
-  marpe_funnel_stages: { id: string; name: string; color: string } | null;
-  marpe_profiles: { id: string; full_name: string } | null;
 }
 interface UserOption { id: string; full_name: string; email: string; }
 interface ContactOption { id: string; name: string; phone: string | null; }
@@ -161,8 +163,11 @@ interface NewDealForm {
   // §10 (28/07): "nome do negócio" — sobrescreve o título gerado (Contato — Ramo)
   title: string;
   ramo: string; seguradora: string; deal_type: string;
-  premio: string; comissao_pct: string; pct_repasse: string;
+  // premio = prêmio LÍQUIDO (base da comissão); iof somado dá o prêmio final (teste B4)
+  premio: string; iof: string; comissao_pct: string; pct_repasse: string;
   comissao_valor: string; valor_repasse: string;
+  // Chamado 5cb84ad8 (Marcel, 01/08)
+  forma_pagamento: string; parcelas: string;
   next_action: string; next_action_date: string;
   // New fields
   campanha: string; ja_possui_produto: boolean;
@@ -173,8 +178,9 @@ interface NewDealForm {
 const EMPTY_FORM: NewDealForm = {
   contact_id: '',
   title: '', ramo: '', seguradora: '', deal_type: 'prospeccao',
-  premio: '', comissao_pct: '', pct_repasse: '',
+  premio: '', iof: '', comissao_pct: '', pct_repasse: '',
   comissao_valor: '', valor_repasse: '',
+  forma_pagamento: '', parcelas: '',
   next_action: '', next_action_date: '',
   campanha: '', ja_possui_produto: false,
   seguradora_atual: '', vigencia_atual_fim: '', corretora_atual: '',
@@ -619,8 +625,10 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
   const [campanhaChoice, setCampanhaChoice] = useState('');
   // Chamado [c598e787] (01/08): Corretora Atual vira seleção, com escape p/ digitar
   const [corretoraLivre, setCorretoraLivre] = useState(false);
-  // Vr. Comissão/Vr. Repasse: auto-calcula de Prêmio × % até o usuário digitar
-  // manualmente no campo (issue #14)
+  // Prêmio final = líquido + IOF (teste B4). Só exibição — no banco é coluna gerada.
+  const premioFinalForm = (parseFloat(form.premio) || 0) + (parseFloat(form.iof) || 0);
+  // Vr. Comissão/Vr. Repasse: auto-calcula de Prêmio LÍQUIDO × % até o usuário digitar
+  // manualmente no campo (issue #14 + teste B4)
   const valorEdited = useRef({ comissao: false, repasse: false });
   useEffect(() => {
     const premio = parseFloat(form.premio);
@@ -746,6 +754,10 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
         observacoes_proposta: form.observacoes_proposta || null,
         // §10 (28/07): nome do negócio opcional — vazio deixa o título automático
         title: form.title.trim() || undefined,
+        // Teste B4 + chamado 5cb84ad8 (01/08)
+        iof: form.iof ? parseFloat(form.iof) : null,
+        forma_pagamento: form.forma_pagamento || null,
+        parcelas: form.parcelas ? parseInt(form.parcelas) : null,
         corp_codram: corpRamo?.codigo || null,
         corp_codcia: corpCia?.codigo || null,
         corp_tipo: corpTipo?.codigo || null,
@@ -869,9 +881,27 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {/* Teste B4 (Marcel, 01/08): "a comissão é calculada pelo prêmio LÍQUIDO e
+                não o prêmio FINAL. Prêmio FINAL = Prêmio líq + IOF. Temos que criar um
+                campo para cada porque o prêmio líquido é o que nos interessa para fins
+                de cálculo de comissão e relatório de produção. Prêmio FINAL é o que
+                interessa para o cliente."
+                O prêmio que vem do Corp JÁ é o líquido — verificado em produção:
+                comissao_valor = premio × pct em 217 de 217 negócios. Por isso a coluna
+                `premio` continua sendo a base e o que entra de novo é o IOF. */}
             <div>
-              <label style={LABEL_S}>Prêmio (R$)</label>
+              <label style={LABEL_S}>Prêmio líquido (R$)</label>
               <input type="number" min="0" step="0.01" value={form.premio} onChange={field('premio')} placeholder="0,00" style={INPUT_S} />
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>Base da comissão</div>
+            </div>
+            <div>
+              <label style={LABEL_S}>IOF (R$)</label>
+              <input type="number" min="0" step="0.01" value={form.iof} onChange={field('iof')} placeholder="0,00" style={INPUT_S} />
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                Prêmio final: <strong style={{ color: 'var(--text-secondary)' }}>
+                  R$ {premioFinalForm.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </strong>
+              </div>
             </div>
             <div>
               <label style={LABEL_S}>Comissão %</label>
@@ -897,6 +927,24 @@ function NewDealModal({ funnels, activeFunnelId, onClose, onCreated, currentUser
                 <option value="">—</option>
                 {(lookups?.bases_repasse || [5]).map(b => (
                   <option key={b} value={String(b)}>{b === 5 ? 'Com. Corretora (padrão)' : `Código ${b}`}</option>
+                ))}
+              </select>
+            </div>
+            {/* Chamado 5cb84ad8 (Marcel, 01/08): forma de pagamento e parcelamento.
+                A CorpAPI não expõe estes campos — ficam só no CRM. */}
+            <div>
+              <label style={LABEL_S}>Forma de pagamento</label>
+              <select value={form.forma_pagamento} onChange={field('forma_pagamento')} style={{ ...INPUT_S, cursor: 'pointer' }}>
+                <option value="">—</option>
+                {FORMAS_PAGAMENTO.map(f => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={LABEL_S}>Parcelamento</label>
+              <select value={form.parcelas} onChange={field('parcelas')} style={{ ...INPUT_S, cursor: 'pointer' }}>
+                <option value="">—</option>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                  <option key={n} value={String(n)}>{n}x{n === 1 ? ' (à vista)' : ''}</option>
                 ))}
               </select>
             </div>
@@ -1960,20 +2008,43 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
           </div>
         )}
 
-        {/* ── Chip da janela de recência (item 11 — legenda de ramos removida, item 4) ── */}
-        {!loading && oldCount > 0 && !isFiltering && (
-          <div style={{ display: 'flex', alignItems: 'center', padding: '8px 20px 0', flexShrink: 0 }}>
-            <span className="fade-in" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 999, padding: '3px 11px' }}>
-              {showOld
-                ? `Mostrando todos os negócios, incluindo ${oldCount.toLocaleString('pt-BR')} sem atividade há mais de ${RECENCY_MONTHS} meses`
-                : `Mostrando os últimos ${RECENCY_MONTHS} meses · ${oldCount.toLocaleString('pt-BR')} antigos ocultos`}
-              <button
-                onClick={() => setShowOld(v => !v)}
-                style={{ border: 'none', background: 'none', color: 'var(--accent-light)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
-              >
-                {showOld ? 'Ver só recentes' : 'Ver todos'}
-              </button>
-            </span>
+        {/* ── Chips de estado do board ────────────────────────────────────────
+            Testes B1 e B6 (Marcel, 01/08). Nos dois o código estava certo e o que
+            faltava era a tela DIZER o que estava fazendo:
+            · B1 "abre em todos" — a janela de 12 meses tinha sido desligada por ele
+              numa sessão anterior e ficou salva nas preferências do navegador. O chip
+              existia mas sumia assim que qualquer filtro entrava; agora fica sempre.
+            · B6 "só a primeira etapa funciona" — o filtro funciona em todas. Acontece
+              que 324 das 325 próximas ações do funil Vendas estão em "Aguardando
+              Início" (as 4.443 de "Emitido" são apólices, sem ação pendente), então
+              filtrar por data realmente só devolve resultado na primeira coluna. O
+              resumo abaixo mostra quantos resultados e em quantas etapas. */}
+        {!loading && (oldCount > 0 || isFiltering) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 20px 0', flexShrink: 0, flexWrap: 'wrap' }}>
+            {oldCount > 0 && (
+              <span className="fade-in" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--field-bg)', border: '1px solid var(--hairline)', borderRadius: 999, padding: '3px 11px' }}>
+                {showOld
+                  ? `Mostrando todos os negócios, incluindo ${oldCount.toLocaleString('pt-BR')} sem atividade há mais de ${RECENCY_MONTHS} meses`
+                  : `Mostrando os últimos ${RECENCY_MONTHS} meses · ${oldCount.toLocaleString('pt-BR')} antigos ocultos`}
+                <button
+                  onClick={() => setShowOld(v => !v)}
+                  style={{ border: 'none', background: 'none', color: 'var(--accent-light)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
+                >
+                  {showOld ? 'Ver só recentes' : 'Ver todos'}
+                </button>
+              </span>
+            )}
+            {isFiltering && (
+              <span className="fade-in" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 600, color: 'var(--accent-light)', background: 'var(--accent-dim)', border: '1px solid rgba(59,130,246,0.28)', borderRadius: 999, padding: '3px 11px' }}>
+                {filteredDeals.length.toLocaleString('pt-BR')} resultado{filteredDeals.length === 1 ? '' : 's'}
+                {' · '}
+                {new Set(filteredDeals.map(d => d.stage_id)).size} etapa{new Set(filteredDeals.map(d => d.stage_id)).size === 1 ? '' : 's'}
+                <button onClick={clearFilters}
+                  style={{ border: 'none', background: 'none', color: 'var(--accent-light)', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', padding: 0, textDecoration: 'underline' }}>
+                  limpar
+                </button>
+              </span>
+            )}
           </div>
         )}
 
@@ -2052,8 +2123,12 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                                 <CardAvatar contact={d.marpe_contacts} />
-                                <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
-                                  {d.marpe_contacts?.name || d.title}
+                                {/* Chamado 196d726d (Marcel, 01/08): "NOME que aparece no
+                                    Card tem que ser o NOME DO NEGÓCIO e não o NOME DO
+                                    CONTATO". O contato desceu para a linha de baixo. */}
+                                <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}
+                                  title={d.title || d.marpe_contacts?.name || ''}>
+                                  {d.title || d.marpe_contacts?.name}
                                 </span>
                                 {d.ramo && (
                                   <span style={{ fontSize: 9, fontWeight: 600, padding: '2px 7px', borderRadius: 100, textTransform: 'uppercase', background: r.bg, color: r.color, flexShrink: 0 }}>
@@ -2061,6 +2136,12 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
                                   </span>
                                 )}
                               </div>
+                              {/* O contato agora vem aqui, abaixo do nome do negócio (196d726d) */}
+                              {d.marpe_contacts?.name && (
+                                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {d.marpe_contacts.name}
+                                </div>
+                              )}
                               {d.seguradora && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{d.seguradora}</div>}
                               {/* Status badge — neutral, no colors (client request: cores no status não agregam) */}
                               {d.status_custom && (
@@ -2172,10 +2253,12 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: isMobile ? 560 : 1000 }}>
               <thead>
                 <tr>
-                  <ColHeader label="Contato" style={isMobile ? { position: 'sticky', left: 0, zIndex: 1 } : {}} />
+                  {/* 196d726d: a Grade passa a abrir pelo NEGÓCIO, com o contato ao lado */}
+                  <ColHeader label="Negócio" style={isMobile ? { position: 'sticky', left: 0, zIndex: 1 } : {}} />
+                  <ColHeader label="Contato" />
                   <ColHeader label="Ramo" />
                   <ColHeader label="Seguradora" />
-                  <ColHeader label="Prêmio" />
+                  <ColHeader label="Prêmio líquido" />
                   <ColHeader label="Produtor" />
                   <ColHeader label="Tipo" />
                   <ColHeader label="Status" />
@@ -2203,6 +2286,9 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
                         maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         ...(isMobile ? { position: 'sticky', left: 0, background: 'var(--bg-primary)', zIndex: 1 } : {}),
                       }}>
+                        {d.title || d.marpe_contacts?.name || '—'}
+                      </td>
+                      <td style={{ padding: '8px 12px', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: 13, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {d.marpe_contacts?.name || '—'}
                       </td>
                       <td style={{ padding: '8px 12px', border: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
@@ -2237,12 +2323,14 @@ export default function CrmBoard({ currentUser }: { currentUser?: CurrentUser })
                       <td style={{ padding: '8px 12px', border: '1px solid var(--border)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         {formatDate(d.vigencia_fim)}
                       </td>
+                      {/* Resolvidos por id em memória (03/08) — ver comentário em
+                          /api/deals sobre por que os joins saíram da resposta */}
                       <td style={{ padding: '8px 12px', border: '1px solid var(--border)', color: 'var(--text-muted)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {d.marpe_profiles?.full_name || '—'}
+                        {users.find(u => u.id === d.responsible_id)?.full_name || '—'}
                       </td>
                       <td style={{ padding: '8px 12px', border: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontSize: 11, color: d.marpe_funnel_stages?.color || 'var(--text-muted)' }}>
-                          {d.marpe_funnel_stages?.name || '—'}
+                        <span style={{ fontSize: 11, color: stages.find(s => s.id === d.stage_id)?.color || 'var(--text-muted)' }}>
+                          {stages.find(s => s.id === d.stage_id)?.name || '—'}
                         </span>
                       </td>
                     </tr>

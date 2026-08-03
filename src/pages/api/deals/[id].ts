@@ -17,7 +17,7 @@ export const GET: APIRoute = async ({ locals, params }) => {
     .from('marpe_deals')
     .select(`
       *,
-      marpe_contacts(id, name, phone, email, city, tags, corp_id),
+      marpe_contacts!contact_id(id, name, phone, email, city, tags, corp_id),
       marpe_funnel_stages(id, name, color, sort_order, is_terminal, terminal_type),
       marpe_funnels(id, name),
       marpe_profiles!responsible_id(id, full_name),
@@ -52,6 +52,9 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
     'campanha', 'ja_possui_produto', 'seguradora_atual', 'vigencia_atual_fim',
     'corretora_atual', 'base_calculo_repasse', 'pct_repasse', 'valor_repasse',
     'agente', 'observacoes_proposta', 'detalhes_corp', 'status_color',
+    // 03/08: IOF (teste B4) + pagamento (chamado 5cb84ad8).
+    // `premio_final` NÃO entra: é coluna gerada (premio + iof) e o banco recusa escrita.
+    'iof', 'forma_pagamento', 'parcelas',
   ];
 
   const updates: Record<string, unknown> = {
@@ -92,7 +95,7 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
     .from('marpe_deals')
     .update(updates)
     .eq('id', id)
-    .select('*, marpe_contacts(id, name, phone, email), marpe_funnel_stages(id, name, color)')
+    .select('*, marpe_contacts!contact_id(id, name, phone, email), marpe_funnel_stages(id, name, color)')
     .single();
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
@@ -136,7 +139,8 @@ export const PATCH: APIRoute = async ({ locals, request, params }) => {
 
   // Log field_update activity for non-stage fields that changed
   const fieldLabels: Record<string, string> = {
-    ramo: 'Ramo', seguradora: 'Seguradora', premio: 'Prêmio', comissao_pct: '% Comissão',
+    ramo: 'Ramo', seguradora: 'Seguradora', premio: 'Prêmio líquido', iof: 'IOF',
+    forma_pagamento: 'Forma de pagamento', parcelas: 'Parcelamento', comissao_pct: '% Comissão',
     comissao_valor: 'Vr. Comissão', produtor: 'Produtor', vigencia_inicio: 'Vigência Início',
     vigencia_fim: 'Vigência Fim', veiculo: 'Veículo', placa: 'Placa', deal_type: 'Tipo',
     campanha: 'Campanha', seguradora_atual: 'Seguradora Atual', corretora_atual: 'Corretora Atual',

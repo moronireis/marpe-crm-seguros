@@ -71,6 +71,11 @@ export default function CadastrosView() {
             </div>
           )}
 
+          {/* Teste A8 (Marcel, 01/08): "onde criar, editar e consultar as etiquetas??"
+              As etiquetas são nossas — por isso, ao contrário dos cadastros do Corp
+              acima, esta seção tem criação, edição e exclusão de verdade. */}
+          <EtiquetasPainel />
+
           {!lookups ? (
             <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Carregando cadastros do Corp…</div>
           ) : (
@@ -107,6 +112,149 @@ export default function CadastrosView() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Etiquetas (teste A8) ─────────────────────────────────────────────────────
+
+interface Etiqueta { id: string; nome: string; cor: string | null; descricao: string | null; contatos: number }
+
+const BTN: React.CSSProperties = {
+  padding: '6px 12px', borderRadius: 8, border: '1px solid var(--hairline)',
+  background: 'var(--field-bg)', color: 'var(--text-secondary)', fontSize: 11.5,
+  cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500,
+};
+const CAMPO: React.CSSProperties = {
+  padding: '7px 12px', background: 'var(--field-bg)', border: '1px solid var(--hairline)',
+  borderRadius: 8, color: 'var(--text-primary)', fontSize: 12.5, outline: 'none',
+  fontFamily: 'inherit', boxSizing: 'border-box',
+};
+
+function EtiquetasPainel() {
+  const [tags, setTags] = useState<Etiqueta[]>([]);
+  const [orfas, setOrfas] = useState<{ nome: string; contatos: number }[]>([]);
+  const [aberto, setAberto] = useState(true);
+  const [nova, setNova] = useState('');
+  const [editando, setEditando] = useState<string | null>(null);
+  const [rascunho, setRascunho] = useState('');
+  const [erro, setErro] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+
+  async function carregar() {
+    try {
+      const d = await (await fetch('/api/tags')).json();
+      setTags(d.tags || []);
+      setOrfas(d.orfas || []);
+    } catch { /* silencioso — a seção some sozinha se a rota falhar */ }
+  }
+  useEffect(() => { carregar(); }, []);
+
+  async function criar(nome: string) {
+    if (!nome.trim()) return;
+    setOcupado(true); setErro('');
+    const r = await fetch('/api/tags', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: nome.trim() }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setOcupado(false);
+    if (!r.ok) { setErro(d.error || 'Não foi possível criar a etiqueta.'); return; }
+    setNova(''); carregar();
+  }
+
+  async function renomear(id: string) {
+    if (!rascunho.trim()) return;
+    setOcupado(true); setErro('');
+    const r = await fetch(`/api/tags/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: rascunho.trim() }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setOcupado(false);
+    if (!r.ok) { setErro(d.error || 'Não foi possível renomear.'); return; }
+    setEditando(null); carregar();
+  }
+
+  async function excluir(t: Etiqueta) {
+    const aviso = t.contatos > 0
+      ? `Excluir "${t.nome}"? Ela será removida de ${t.contatos} contato(s).`
+      : `Excluir a etiqueta "${t.nome}"?`;
+    if (!confirm(aviso)) return;
+    setOcupado(true); setErro('');
+    const r = await fetch(`/api/tags/${t.id}`, { method: 'DELETE' });
+    setOcupado(false);
+    if (!r.ok) { setErro('Não foi possível excluir.'); return; }
+    carregar();
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', background: 'var(--bg-card)', marginBottom: 8 }}>
+      <button onClick={() => setAberto(v => !v)}
+        style={{ width: '100%', textAlign: 'left', padding: '12px 16px', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 10 }}>
+        Etiquetas
+        <span style={{ fontSize: 10, fontWeight: 600, background: 'var(--field-bg)', border: '1px solid var(--hairline)', color: 'var(--text-muted)', borderRadius: 999, padding: '1px 8px' }}>{tags.length}</span>
+        <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--accent-light)' }}>editável</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>{aberto ? '▾' : '▸'}</span>
+      </button>
+
+      {aberto && (
+        <div style={{ borderTop: '1px solid var(--border-subtle)', padding: '12px 16px' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <input value={nova} onChange={e => setNova(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') criar(nova); }}
+              placeholder="Nome da nova etiqueta" style={{ ...CAMPO, flex: 1 }} />
+            <button onClick={() => criar(nova)} disabled={ocupado || !nova.trim()}
+              style={{ ...BTN, background: 'var(--accent)', color: '#fff', borderColor: 'transparent', opacity: (ocupado || !nova.trim()) ? 0.5 : 1 }}>
+              Criar
+            </button>
+          </div>
+
+          {erro && <div style={{ fontSize: 11.5, color: 'var(--red, #ef4444)', marginBottom: 10 }}>{erro}</div>}
+
+          {tags.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 0' }}>Nenhuma etiqueta cadastrada ainda.</div>}
+
+          {tags.map(t => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+              {editando === t.id ? (
+                <>
+                  <input value={rascunho} onChange={e => setRascunho(e.target.value)} autoFocus
+                    onKeyDown={e => { if (e.key === 'Enter') renomear(t.id); if (e.key === 'Escape') setEditando(null); }}
+                    style={{ ...CAMPO, flex: 1 }} />
+                  <button onClick={() => renomear(t.id)} disabled={ocupado} style={BTN}>Salvar</button>
+                  <button onClick={() => { setEditando(null); setErro(''); }} style={BTN}>Cancelar</button>
+                </>
+              ) : (
+                <>
+                  <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nome}</span>
+                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>
+                    {t.contatos} contato{t.contatos === 1 ? '' : 's'}
+                  </span>
+                  <button onClick={() => { setEditando(t.id); setRascunho(t.nome); setErro(''); }} style={BTN}>Renomear</button>
+                  <button onClick={() => excluir(t)} style={BTN}>Excluir</button>
+                </>
+              )}
+            </div>
+          ))}
+
+          {/* Etiquetas que alguém digitou direto no contato e nunca entraram no catálogo */}
+          {orfas.length > 0 && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+                Em uso nos contatos, fora do catálogo — clique para adicionar:
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {orfas.map(o => (
+                  <button key={o.nome} onClick={() => criar(o.nome)} disabled={ocupado}
+                    style={{ ...BTN, fontSize: 11 }}>
+                    + {o.nome} <span style={{ color: 'var(--text-muted)' }}>({o.contatos})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
