@@ -268,3 +268,55 @@ menu), com renomear e excluir refletindo nos contatos.
 Ordem recomendada: **S1 → S3 → S2 → S4**. O S1 mata os três bugs que o cliente vê todo dia
 (áudio, duplicação, lentidão); o S3 são campos pequenos com valor alto para o Marcel; o S2 é o
 épico e merece uma sessão inteira sem disputa de contexto — e depende das decisões 1, 3 e 5.
+
+---
+
+## 6. Registro da execução (03/08)
+
+**No ar**: deploy `gck8jq6if`. Migração `20260803` aplicada (7 statements + verify).
+Commits `6e1e10c` (entrega) e `f7ca853` (correções vindas do repo da u4digital).
+
+### E2E em produção — 8 frentes
+
+| Verificação | Resultado |
+|---|---|
+| Board do funil Vendas | 200 · 4.877 negócios · **4,38 MB** (era ~7,3 MB) · 2,2-2,8 s |
+| Etiquetas | criar 201 · duplicada 409 · renomear 200 · excluir 200, sem resíduo |
+| Busca de negócios | por nome do negócio, nome do contato e código do Corp |
+| Aba Contatos com todos | contato só do Corp (nunca conversou) aparece na busca |
+| Índice UNIQUE de wa_message_id | 2ª gravação do mesmo id → 23505, como esperado |
+| Prêmio líquido/IOF/final | PATCH 200, coluna gerada calculou 1986,99 + 13,23 = 2000,22 |
+| Refresh do Corp ao abrir o card | traz prêmio e comissão (antes só percentuais e textos) |
+| CSV, badges, dashboard, busca | 200 em todos |
+
+**Regressão pega pelo E2E e corrigida antes de qualquer uso**: a coluna nova
+`active_deal_id` criou uma segunda relação entre `marpe_deals` e `marpe_contacts`, e o
+PostgREST passou a recusar o embed por ambiguidade — o board voltou 500. Todos os
+embeds foram explicitados com `marpe_contacts!contact_id`.
+
+### Descoberta: o repositório da u4digital seguiu por outro caminho
+
+Ao sincronizar, apareceram 4 commits do Renan (19-21/07) que **nunca chegaram à
+produção** — a linha que publica é a deste repositório. Isso explica por que o Marcel
+viu de novo em 01/08 bugs que já tinham correção lá.
+
+- Trazidas para produção: `wasSentByApi` (descarte preciso do eco da UazapiGO),
+  destaque de @menções e formatação nas legendas, try/finally no envio (candidato à
+  causa do A12), select de seguradora que não degrada mais para campo de texto.
+- **Recusada**, com medição: a segunda camada do dedupe (descartar `fromMe` com
+  outbound do mesmo tipo nos últimos 30 s) apagaria **124 das últimas 400 mensagens
+  enviadas** — mensagens seguidas digitadas no celular caem no critério.
+- **Não trazida**: a containerização (Docker/Traefik/Swarm, adapter Vercel→Node).
+  Muda o destino do deploy; é decisão de infraestrutura do Moroni e do Tiago.
+
+O trabalho de 03/08 foi para a branch `entrega-0308` no repositório da u4digital, sem
+tocar na `main` deles.
+
+### O que ficou de fora
+
+| Item | Motivo |
+|---|---|
+| A12 (sobretela do `/`) | Não reproduzido aqui. A correção do Renan é candidata; pedi reteste e o passo a passo. |
+| Menção @ funcional em grupos | Hoje vai como texto e o WhatsApp não a transforma em marcação. Precisa de probe na UazapiGO. |
+| Busca por chassi e proposta | O dado não existe no CRM nem na CorpAPI. Decisão 3 da seção 3. |
+| Nome dos negócios vindos do Corp | Card já mostra o nome do negócio; falta decidir o formato dos 4.877 automáticos. Decisão 1. |
