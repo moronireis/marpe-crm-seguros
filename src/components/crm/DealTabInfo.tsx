@@ -120,11 +120,16 @@ export default function DealTabInfo({ deal, onSave, currentUser }: Props) {
     }
   }, [editing, lookups, users.length]);
 
-  // Select que degrada para o valor atual quando a lista Corp não carregou
+  // Select que desabilita enquanto a lista Corp não carregou (sem entrada de texto livre)
   function corpSelect(key: string, options: { nome: string }[] | undefined, placeholder: string) {
     const current = String(form[key] ?? '');
     if (!options?.length) {
-      return <input value={current} onChange={field(key)} placeholder={placeholder} style={s.input} />;
+      return (
+        <select disabled value="" style={s.select}>
+          <option value="">Carregando opções do Corp...</option>
+          {current && <option value={current}>{current} (atual)</option>}
+        </select>
+      );
     }
     const inList = options.some(o => o.nome === current);
     return (

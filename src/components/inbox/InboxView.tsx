@@ -65,7 +65,14 @@ function MessageContent({ m }: { m: Message }) {
     </div>
   );
 
-  if (content_type === 'image') {
+  // renderBody: delega a formatWaText (que já faz highlight de @Nome resolvidos
+  // e formatação WhatsApp). Usado em captions de mídia.
+  const renderBody = (t: string | null): React.ReactNode => {
+    if (!t) return null;
+    return formatWaText(t);
+  };
+
+  if (content_type === 'image' || content_type === 'photo') {
     return (
       <div>
         {!src ? brokenNote('Imagem indisponível')
@@ -80,16 +87,17 @@ function MessageContent({ m }: { m: Message }) {
               />
             </a>
           )}
-        {body && <div style={{ marginTop: 5, fontSize: 13, lineHeight: 1.4 }}>{body}</div>}
+        {/* legenda com formatação/menções (renderBody veio do commit a2acb7f do Renan) */}
+        {body && <div style={{ marginTop: 5, fontSize: 13, lineHeight: 1.4 }}>{renderBody(body)}</div>}
       </div>
     );
   }
 
-  if (content_type === 'audio') {
+  if (content_type === 'audio' || content_type === 'myaudio' || content_type === 'voice' || content_type === 'ptt') {
     return (
       <div>
         <AudioPlayer src={src} mime={media_mime} />
-        {body && <div style={{ marginTop: 5, fontSize: 13 }}>{body}</div>}
+        {body && <div style={{ marginTop: 5, fontSize: 13 }}>{renderBody(body)}</div>}
       </div>
     );
   }
@@ -216,22 +224,33 @@ function linkify(text: string, keyBase: string): React.ReactNode[] {
   return out.length ? out : [text];
 }
 
-// Renderiza a formatação leve do WhatsApp: *negrito*, _itálico_, ~tachado~ e
-// ```mono``` (S3.9, issue #8 — antes os marcadores apareciam crus no chat),
-// já com os links clicáveis dentro de cada trecho (S1 #5).
+// Renderiza a formatação leve do WhatsApp: *negrito*, _itálico_, ~tachado~,
+// ```mono``` e o destaque das @menções, com os links clicáveis dentro de cada
+// trecho (S1 #5). O destaque de menção veio do commit a2acb7f (Renan, repo da
+// u4digital, 21/07) — que nunca tinha chegado à produção — e resolve a parte de
+// exibição do teste A10. O regex do nome foi limitado a 3 palavras: o original
+// aceitava 40 caracteres corridos e engolia a frase inteira depois do @.
 function formatWaText(text: string): React.ReactNode {
   if (!text) return text;
-  if (!/[*_~`]/.test(text)) return <>{linkify(text, 'p')}</>;
+  if (!/[*_~`@]/.test(text)) return <>{linkify(text, 'p')}</>;
   const parts: React.ReactNode[] = [];
-  const re = /\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~|```([\s\S]+?)```/g;
+  const re = /\*([^*\n]+)\*|_([^_\n]+)_|~([^~\n]+)~|```([\s\S]+?)```|(@\d{8,15})|(@[A-Za-zÀ-ÿ]+(?:\s[A-Za-zÀ-ÿ]+){0,2})/g;
   let last = 0;
   let mIdx = 0;
+  const ESTILO_MENCAO: React.CSSProperties = {
+    color: 'var(--accent-light)', fontWeight: 600,
+    background: 'rgba(59,130,246,0.15)', padding: '1px 4px', borderRadius: 4,
+  };
   for (let match = re.exec(text); match; match = re.exec(text)) {
     if (match.index > last) parts.push(...linkify(text.slice(last, match.index), `t${mIdx}`));
     if (match[1] !== undefined) parts.push(<strong key={mIdx++}>{linkify(match[1], `b${mIdx}`)}</strong>);
     else if (match[2] !== undefined) parts.push(<em key={mIdx++}>{linkify(match[2], `i${mIdx}`)}</em>);
     else if (match[3] !== undefined) parts.push(<s key={mIdx++}>{match[3]}</s>);
     else if (match[4] !== undefined) parts.push(<code key={mIdx++} style={{ fontSize: '0.92em', background: 'var(--field-bg)', padding: '1px 5px', borderRadius: 5 }}>{match[4]}</code>);
+    // @número que não bateu com nenhum contato da base
+    else if (match[5] !== undefined) parts.push(<span key={mIdx++} style={ESTILO_MENCAO}>{match[5]}</span>);
+    // @Nome já resolvido por resolveMentions()
+    else if (match[6] !== undefined) parts.push(<span key={mIdx++} style={ESTILO_MENCAO}>{match[6]}</span>);
     last = match.index + match[0].length;
   }
   if (last < text.length) parts.push(...linkify(text.slice(last), `e${mIdx}`));
@@ -1113,10 +1132,13 @@ export default function InboxView() {
       const d = await r.json();
       setMessages(d.messages || []);
       setHasMoreMsgs(!!d.has_more);
-    } catch {}
-    setSending(false);
-    // #31: sem o refocus, cada envio exigia novo clique na área de texto
-    requestAnimationFrame(() => inputRef.current?.focus());
+    } catch {
+      // garante que o input não fique travado em caso de erro de rede
+    } finally {
+      setSending(false);
+      // #31: sem o refocus, cada envio exigia novo clique na área de texto
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
   }
 
   // On mobile, hide list when a contact is selected (show chat full-width)

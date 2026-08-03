@@ -67,6 +67,13 @@ export const POST: APIRoute = async ({ request }) => {
   const msg = body.message || {};
   const chat = body.chat || {};
 
+  // wasSentByApi: UazapiGO envia este flag nos ecos de mensagens enviadas via API.
+  // Quando true, a mensagem já foi gravada pelo handler que a originou
+  // (/api/messages para texto, /api/messages/media para mídia) — ignorar o eco
+  // para não criar uma segunda entrada duplicada (causa do "texto duplicado ao enviar imagem").
+  const wasSentByApi: boolean = msg.wasSentByApi ?? body.wasSentByApi ?? false;
+  if (wasSentByApi) return new Response('OK', { status: 200 });
+
   // Extract fields from actual UazapiGO format
   const chatid = msg.chatid || chat.wa_chatid || body.chatid || '';
   const phone = chatid.replace('@s.whatsapp.net', '').replace('@g.us', '');
@@ -314,7 +321,7 @@ export const POST: APIRoute = async ({ request }) => {
 
   if (!contactId) return new Response('OK', { status: 200 });
 
-  // Avoid duplicate messages
+  // Avoid duplicate messages — primeira camada: mesmo wa_message_id
   if (messageId) {
     const { data: dup } = await sb
       .from('marpe_messages')
@@ -323,6 +330,15 @@ export const POST: APIRoute = async ({ request }) => {
       .maybeSingle();
     if (dup?.id) return new Response('OK', { status: 200 });
   }
+
+  // ⚠️ REMOVIDA a segunda camada que vinha no commit 422aafc (janela de 30s: descartar
+  // fromMe quando já houvesse outbound do mesmo tipo para o mesmo contato nos últimos
+  // 30 segundos). A intenção estava certa, mas o critério não distingue eco de mensagem
+  // nova: quem manda duas mensagens seguidas pelo celular cai nele. Medido contra a
+  // produção em 03/08 — das últimas 400 mensagens enviadas, **124 seriam apagadas**,
+  // incluindo pares legítimos ("kkkkk" seguido de "jóia", 0,2s depois).
+  // O que cobre esse caso sem falso positivo é o índice UNIQUE parcial em
+  // wa_message_id (migração 20260803) somado ao recheck colado no insert, mais abaixo.
 
   // Survey response capture — only for individual inbound text messages
   if (!isGroup && !fromMe && contentType === 'text' && messageBody.trim()) {
