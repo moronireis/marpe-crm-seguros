@@ -5,13 +5,14 @@ import { syncNegocios } from '../../../lib/corp/sync';
 
 export const prerender = false;
 
-const THROTTLE_MINUTES = 10;
+const THROTTLE_MINUTES = 5;
 const SETTINGS_KEY = 'corp_sync_light_last_run';
 
 // POST /api/corp/sync-light
 // Lightweight near-real-time sync: pulls the Corp active-negotiations LIST
 // (fast, no per-negocio detail calls) and upserts deals. Fired from the CRM
-// board on load; self-throttles to once every 10 minutes.
+// board on load; self-throttles to once every 5 minutes (report Tiago 04/08:
+// "sincronização em tempo real" — 10 → 5 min em 07/08).
 // The nightly cron (corp-sync) still runs the full sync with details.
 export const POST: APIRoute = async ({ locals }) => {
   const profile = requireAuth(locals);

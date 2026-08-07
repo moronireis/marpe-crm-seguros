@@ -1,13 +1,16 @@
 # Sync diurno Corp→CRM (checkpoint 15/07)
-# A cada 30 min, 8h–20h30 BRT (11–23 UTC), seg–sáb, chama o endpoint interno que roda
-# syncNegocios com detalhe + reconciliação de exclusões. Roda aqui porque o plano
-# Vercel Hobby não executa cron sub-diário (o noturno das 3h UTC segue na Vercel).
+# A cada 15 min (report "tempo real" 04/08; era 30 até 07/08), 8h–20h45 BRT
+# (11–23 UTC), seg–sáb, chama o endpoint interno que roda syncNegocios com
+# detalhe + reconciliação de exclusões. Roda aqui porque o plano Vercel Hobby
+# não executa cron sub-diário (o noturno das 3h UTC segue na Vercel).
+# Orçamento GH Actions (repo privado, 2.000 min/mês): ~52 runs/dia × ~1 min ≈
+# 1.350 min/mês — dentro do teto; não reduzir abaixo de 15 min sem revisar.
 # Disparo manual: aba Actions → Corp sync diurno → Run workflow.
 name: Corp sync diurno
 
 on:
   schedule:
-    - cron: '*/30 11-23 * * 1-6'
+    - cron: '*/15 11-23 * * 1-6'
   workflow_dispatch: {}
 
 jobs:
